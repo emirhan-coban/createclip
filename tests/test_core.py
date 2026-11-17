@@ -162,3 +162,12 @@ def test_project_endpoint_sorts_by_score(tmp_path):
     r = TestClient(make_app(tmp_path)).get("/api/projects/p-1").json()
     assert [c["i"] for c in r["clips"]] == [3, 2, 4, 1]
     assert [c["rank"] for c in r["clips"]] == [1, 2, 3, 4]
+
+
+def test_cli_parser_builds(capsys):
+    import pytest
+    from createclip.cli import main
+    for args in (["--help"], ["run", "--help"], ["serve", "--help"]):
+        with pytest.raises(SystemExit) as e:
+            main(args)
+        assert e.value.code == 0

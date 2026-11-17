@@ -30,7 +30,7 @@ def main(argv=None):
                    help="an bulma kaynağı (auto: sohbet, olmazsa ses)")
     r.add_argument("--at", action="append", default=[], metavar="ZAMAN",
                    help="elle klip: '1:44:50' (45 sn) veya '1:44:50-1:45:40'; birden fazla verilebilir")
-    r.add_argument("--full-chat", action="store_true", help="sohbeti eksiksiz indir (~19,6 dk; varsayılan hızlı mod ~18,4 dk, mesajların %98'i)")
+    r.add_argument("--full-chat", action="store_true", help="sohbeti eksiksiz indir (~19,6 dk; varsayılan hızlı mod ~18,4 dk, mesajların %%98'i)")
     r.add_argument("--vocab", default="", help="isteğe bağlı özel kelimeler (örn. 'Berk, Derbeder'); "
                    "kısa tut, uzun liste konuşmanın atlanmasına yol açabilir")
     r.add_argument("--size", type=float, help="altyazı boyutu (genişliğin oranı, örn. 0.06)")
