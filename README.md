@@ -21,7 +21,7 @@ Her klip web arayüzünde düzenlenebilir. Her şey yerelde çalışır (Apple S
 | ![Fontlar](docs/img/fonts.png) | ![Dikey](docs/img/portrait.png) |
 
 ## Gereksinimler
-`ffmpeg`, `yt-dlp`, `curl` (`brew install ffmpeg yt-dlp`), Python 3.11+. İlk altyazıda
+`ffmpeg`, `yt-dlp`, `curl` (`brew install ffmpeg yt-dlp`), Python 3.10+. İlk altyazıda
 `mlx-community/whisper-large-v3-mlx` (~3 GB) indirilir; ayrı hizalama modeli gerekmez.
 
 ## Kurulum
