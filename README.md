@@ -47,16 +47,20 @@ Komut satırı:
 `raw/` (kenar payı olan ham kesit), `chat.jsonl` (önbellek), `manifest.json`.
 
 ## Sohbet indirme süreleri (ölçüldü)
-2,5 saatlik bir yayında (~16 bin mesaj):
+Kick'in sohbet API'si bir istekte yalnızca ~5 sn'lik pencere verir ve sürekli yaklaşık **1,5 istek/sn**'ye izin verir
+(150 sn'lik ölçüm: 1,2 ve 1,5/sn'de hiç `429` yok; 1,8/sn'de 274 istekten 21'i reddedildi). Yani indirmeyi hızlandırmanın yolu
+daha hızlı istemek değil, **daha az istemek**. Bu yüzden iki mod var:
 
-| Mod | Süre | Mesaj |
-|---|---|---|
-| Hızlı (5 sn'de bir istek) | 18,4 dk | 16 080 (%98) |
-| Tam (yoğun anlar dahil) | 19,6 dk | 16 449 |
-| Ses seviyesi (`--source audio`) | internet hızına bağlı (ölçülmedi) | sohbet yok |
+| Mod | 2,5 saatlik yayın | 6 saatlik yayın (59 188 mesaj) | Sonuç |
+|---|---|---|---|
+| **Akıllı** (varsayılan) | ≈ 8 dk (tahmin) | **23,6 dk** (1781 istek) | en iyi 5 an aynı, ilk 10'un 9'u, ilk 30'un 23'ü |
+| **Tam** | ≈ 20 dk | **≈ 57 dk** | eksiksiz |
+| Ses seviyesi (`--source audio`) | internet hızına bağlı (ölçülmedi) | — | sohbet yok |
 
-Süreyi Kick'in hız sınırı (`HTTP 429`, 4 paralel istekte bile) belirler; bu yüzden hızlı/tam farkı küçüktür.
-Gerçekten hızlı yol ses modudur, ama sohbet tepkisini görmez.
+Akıllı mod: önce her 8. pencereyi örnekler, sonra en güçlü adayların (en çok 60) ±45 sn çevresini ayrıntılı indirir; anlar yoğun
+veriden seçilir. Parametreler gerçek 6 saatlik veride tarandı (istekleri ~%33'e indirirken ilk 10 korundu). Yarıda kalan indirme
+(kapanma, uyku, kopma) **kaldığı yerden devam eder**: her istek `chat.log.jsonl` dosyasına eklenir; akıllı ve tam mod aynı
+önbelleği paylaşır. Not: 2,5 saatlik değer o yayında ölçülen istek sayısından değil, ölçeklemeden hesaplandı.
 
 ## Nasıl çalışır
 ```mermaid
@@ -70,7 +74,7 @@ flowchart LR
   G --> H[Opsiyonel 9:16]
   H --> I[Web editörü]
 ```
-1. **Sohbet:** Kick'in resmi olmayan API'sinden `curl` ile indirilir ve önbelleğe alınır. Bir istek ~5 sn'lik pencere ve en çok ~25
+1. **Sohbet:** Kick'in resmi olmayan API'sinden `curl` ile, hız sınırının altında (≈1,5 istek/sn) indirilir ve istek istek diske yazılır. Bir istek ~5 sn'lik pencere ve en çok ~25
    mesaj döndürür; `cursor` alanı mesaj atlattığı için kullanılmaz. Alınamazsa en düşük kaliteli VOD (~250 MB) indirilip ses seviyesi ölçülür.
 2. **Pik:** 10 sn dilimlerde skor, ilk 2 dk / son 1 dk atlanır, pikler ≥90 sn arayla, pencere pikten 20 sn önce başlar (25-60 sn).
 3. **Kesim:** yalnız ilgili aralık (±10 sn pay) indirilir; kesim noktaları `silencedetect` ile en yakın konuşma arasına çekilir.
@@ -86,7 +90,7 @@ zamanları 5 klipte ses başlangıçlarıyla karşılaştırıldı: medyan sapma
 
 ## Geliştirme
 ```bash
-./.venv/bin/python -m pytest -q       # 19 test
+./.venv/bin/python -m pytest -q       # 23 test
 ```
 Dosyalar: `kick.py` (VOD + sohbet), `peaks.py`, `audio_peaks.py`, `clipper.py`, `transcribe.py`, `captions.py`, `layout.py`,
 `pipeline.py` (iş akışı + düzenleme), `web/` (FastAPI + tek sayfa arayüz), `syncfix.py` (senkron ölçüm aracı).

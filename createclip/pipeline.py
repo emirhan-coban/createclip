@@ -29,7 +29,7 @@ class Options:
     snap: bool = True            # snap cuts to pauses in speech
     source: str = "auto"         # auto | chat | audio
     at: list = field(default_factory=list)   # manual clips: "1:44:50" or "1:44:50-1:45:40"
-    full_chat: bool = False      # complete chat download (~19.6 min) instead of fast (~18.4 min, 98% of messages)
+    chat_mode: str = "smart"     # smart (sparse sampling + dense around candidates) | full (every window)
     vocab: str = ""              # optional names for the speech model, e.g. "Berk, Derbeder" (use sparingly)
 
 
@@ -252,11 +252,16 @@ def run(url: str, root: Path, opts: Options, progress=_noop) -> dict:
         found, source = [], None
         if opts.source in ("auto", "chat"):
             try:
-                progress("chat", 0, "Sohbet indiriliyor (≈18-20 dk; Kick hız sınırı yüzünden)")
-                msgs = kick.fetch_chat(vod, jd, progress=lambda f, n: progress("chat", f, f"{n} mesaj"),
-                                       fast=not opts.full_chat)
+                progress("chat", 0, "Sohbet indiriliyor (yarıda kesilirse kaldığı yerden devam eder)")
+                data = kick.fetch_chat(vod, jd, mode=opts.chat_mode,
+                                       progress=lambda f, n, st="": progress("chat", f, f"{st} · {n} mesaj"))
+                msgs = data.msgs
                 kw = dict(lead=opts.lead, min_len=opts.min_len, max_len=opts.max_len)
-                found = peaks.find_peaks(msgs, vod.duration, n=CANDIDATES, **kw)
+                if data.dense:
+                    found = peaks.find_peaks(msgs, vod.duration, n=CANDIDATES, **kw)
+                else:
+                    found = peaks.find_peaks_sparse(msgs, data.coverage, data.baseline, vod.duration,
+                                                    n=CANDIDATES, **kw)
                 source = "chat"
             except kick.KickError as e:
                 if opts.source == "chat":

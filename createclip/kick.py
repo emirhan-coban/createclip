@@ -50,21 +50,58 @@ def vod_info(url: str) -> Vod:
                int(d["channel_id"]), url)
 
 
-WORKERS = 4          # Kick answers HTTP 429 from ~8 parallel requests; 4 is safe (measured)
+# Kick's chat endpoint tolerates about 1.5 requests/s sustained (measured over 150 s: 1.2/s and 1.5/s -> no
+# HTTP 429; 1.8/s -> 21 of 274 rejected, net 1.69/s). We pace ourselves just under that instead of hammering
+# and backing off. Faster is only possible by asking for less data (smart mode), not by asking faster.
+WORKERS = 4
+RATE = 1.5           # requests / second (adaptive: lowered on 429, slowly raised again)
+RATE_MIN, RATE_MAX = 0.6, 1.7
 PAGE_CAP = 20        # a response holding this many messages was probably cut by Kick's per-request cap
-CACHE_VERSION = "v2"      # complete crawl. (v1 followed the API's `cursor`, which skips ~2/3 of the messages)
-FAST_VERSION = "v2-fast"  # one request per 5 s window; dense moments are truncated by Kick's per-request cap
-_cool = {"until": 0.0}
-_cool_lock = threading.Lock()
+WIN = 5.0            # one request returns the messages of a ~5 s window
+COARSE_EVERY = 8     # smart mode, stage 1: one window out of this many
+REGION_PAD = 45.0    # smart mode, stage 2: crawl this many seconds around each candidate peak
+LOG_NAME = "chat.log.jsonl"
 
 
-def _get(url: str, tries: int = 6):
+class Limiter:
+    """Shared pacing for all workers: one request slot every 1/rate seconds, AIMD on 429."""
+
+    def __init__(self, rate: float = RATE):
+        self.rate = rate
+        self.next = 0.0
+        self.good = 0
+        self.lock = threading.Lock()
+
+    def wait(self):
+        with self.lock:
+            now = time.time()
+            self.next = max(self.next, now) + 1.0 / self.rate
+            slot = self.next - 1.0 / self.rate
+        if slot > now:
+            time.sleep(slot - now)
+
+    def ok(self):
+        with self.lock:
+            self.good += 1
+            if self.good >= 60:
+                self.good = 0
+                self.rate = min(RATE_MAX, self.rate + 0.1)
+
+    def throttle(self, cool: float = 6.0):
+        with self.lock:
+            self.good = 0
+            self.rate = max(RATE_MIN, self.rate * 0.75)
+            self.next = max(self.next, time.time() + cool)
+
+
+_limiter = Limiter()
+
+
+def _get(url: str, tries: int = 8):
     # curl, not urllib: Kick's edge answers curl in ~1 s but stalls Python's TLS client.
     last = None
     for i in range(tries):
-        wait = _cool["until"] - time.time()
-        if wait > 0:
-            time.sleep(wait)
+        _limiter.wait()
         try:
             p = subprocess.run(["curl", "-s", "--max-time", "20", "-A", UA["User-Agent"], "-w", "\n%{http_code}", url],
                                capture_output=True, text=True)
@@ -72,13 +109,15 @@ def _get(url: str, tries: int = 6):
                 raise RuntimeError(f"curl exit {p.returncode}")
             body, _, code = p.stdout.rpartition("\n")
             if code == "429":
-                with _cool_lock:                       # every worker backs off together
-                    _cool["until"] = max(_cool["until"], time.time() + 4 + 3 * i)
+                _limiter.throttle(4 + 3 * i)
                 raise RuntimeError("429 (hız sınırı)")
-            return json.loads(body)
+            d = json.loads(body)
+            _limiter.ok()
+            return d
         except Exception as e:  # noqa: BLE001
             last = e
-            time.sleep(1.0 * (i + 1))
+            if "429" not in str(e):
+                time.sleep(1.0 * (i + 1))
     raise KickError(f"Kick sohbet API'sine ulaşılamadı: {last}")
 
 
@@ -86,62 +125,160 @@ def _iso(ts: float) -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(ts))
 
 
-def fetch_chat(vod: Vod, cache_dir: Path, progress=None, workers: int = WORKERS, fast: bool = True):
-    """Returns list of {t: seconds-from-vod-start, u: user, c: content}. Cached per VOD.
+class Coverage:
+    """Merged [a, b) intervals (seconds from VOD start) whose messages are all in the cache."""
 
-    The API returns the messages of a ~5 s window starting at `start_time` (at most ~25 of them).
-    We step by 5 s, or - when a response is full - continue from its last message so busy moments are
-    complete (full mode). fast mode takes one request per 5 s. Measured on a 2.5 h VOD: fast 18.4 min / 16080
-    msgs, full 19.6 min / 16449 msgs - Kick's rate limit (HTTP 429) dominates, not the request count. The VOD is cut into many short
-    segments crawled by a small pool of workers."""
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    f, done = cache_dir / "chat.jsonl", cache_dir / "chat.done"
-    ok = {CACHE_VERSION} if not fast else {CACHE_VERSION, FAST_VERSION}   # a full cache also serves fast
-    if f.exists() and done.exists() and done.read_text().strip() in ok:
-        return [json.loads(l) for l in f.read_text().splitlines() if l.strip()]
+    def __init__(self):
+        self.iv: list[list[float]] = []
+        self.lock = threading.Lock()
 
-    base, end = float(vod.start_ts), float(vod.start_ts) + vod.duration
-    seen, msgs = set(), []
-    lock = threading.Lock()
-    covered = [0.0]
+    def add(self, a: float, b: float):
+        with self.lock:
+            iv = self.iv + [[a, b]]
+            iv.sort()
+            out = [iv[0]]
+            for x, y in iv[1:]:
+                if x <= out[-1][1] + 1e-6:
+                    out[-1][1] = max(out[-1][1], y)
+                else:
+                    out.append([x, y])
+            self.iv = out
 
-    def crawl(a: float, b: float):
-        t = a
-        while t < b:
-            data = _get(f"https://kick.com/api/v2/channels/{vod.channel_id}/messages?start_time={_iso(t)}")["data"]
+    def end_of(self, t: float) -> float:
+        """First uncovered second at or after t."""
+        with self.lock:
+            for a, b in self.iv:
+                if a - 1e-6 <= t < b:
+                    return b
+                if a > t:
+                    break
+        return t
+
+    def covers(self, a: float, b: float) -> bool:
+        return self.end_of(a) >= b - 1e-6
+
+
+@dataclass
+class ChatData:
+    msgs: list
+    coverage: Coverage
+    dense: bool                      # True: whole VOD crawled; False: smart (sparse + dense regions)
+    baseline: list                   # window start offsets that form an unbiased sample (smart mode)
+
+
+class Chat:
+    """Crawls and caches a VOD's chat. Every finished request is appended to <cache>/chat.log.jsonl, so an
+    interrupted download (crash, sleep, closed tab) resumes where it stopped instead of starting over."""
+
+    def __init__(self, vod: Vod, cache_dir: Path, progress=None, workers: int = WORKERS):
+        self.vod, self.progress, self.workers = vod, progress, workers
+        self.dir = Path(cache_dir)
+        self.dir.mkdir(parents=True, exist_ok=True)
+        self.path = self.dir / LOG_NAME
+        self.base = float(vod.start_ts)
+        self.cov, self.seen, self.msgs = Coverage(), set(), []
+        self.lock = threading.Lock()
+        self.requests = 0
+        self._load()
+        self.fh = open(self.path, "a", encoding="utf-8")
+
+    def _load(self):
+        if not self.path.exists():
+            return
+        for line in self.path.read_text(encoding="utf-8").splitlines():
+            try:
+                r = json.loads(line)
+                self._ingest(r["m"], r["a"], r["b"])
+            except (ValueError, KeyError):
+                continue                      # torn last line from an interrupted run
+
+    def _ingest(self, ms, a, b):
+        for mid, t, u, c in ms:
+            if mid not in self.seen:
+                self.seen.add(mid)
+                self.msgs.append({"t": t, "u": u, "c": c})
+        self.cov.add(a, b)
+
+    def _note(self, stage, done, total):
+        if self.progress:
+            self.progress(min(1.0, done / max(total, 1)), len(self.msgs), stage)
+
+    def fetch(self, t: float, adaptive: bool):
+        """Fetch the window starting at offset t (adaptive: keep going while responses are full)."""
+        end = min(t + WIN, self.vod.duration)
+        cur = self.cov.end_of(t)
+        while cur < end - 1e-6:
+            data = _get(f"https://kick.com/api/v2/channels/{self.vod.channel_id}/messages?start_time={_iso(self.base + cur)}")["data"]
             ms = data.get("messages", [])
-            with lock:
-                for m in ms:
-                    if m["id"] in seen:
-                        continue
-                    seen.add(m["id"])
-                    off = _parse_ts(m["created_at"]) - base
-                    if 0 <= off <= vod.duration:
-                        msgs.append({"t": off, "u": m["sender"]["username"], "c": m["content"]})
-            if not fast and len(ms) >= PAGE_CAP:
-                last = _parse_ts(ms[-1]["created_at"])
-                nt = last if last > t else t + 1
-            else:
-                nt = t + 5
-            with lock:
-                covered[0] += min(nt, b) - t
-                if progress:
-                    progress(min(1.0, covered[0] / vod.duration), len(msgs))
-            t = nt
+            rows = []
+            for m in ms:
+                off = _parse_ts(m["created_at"]) - self.base
+                if 0 <= off <= self.vod.duration:
+                    rows.append([m["id"], off, m["sender"]["username"], m["content"]])
+            nxt = cur + WIN
+            if adaptive and len(ms) >= PAGE_CAP:
+                last = _parse_ts(ms[-1]["created_at"]) - self.base
+                nxt = last if last > cur else cur + 1
+            with self.lock:
+                self._ingest(rows, cur, nxt)
+                self.fh.write(json.dumps({"a": cur, "b": nxt, "m": rows}, ensure_ascii=False) + "\n")
+                self.fh.flush()
+                self.requests += 1
+            cur = nxt
 
-    seg = max(60.0, vod.duration / 60)
-    bounds = []
-    a = base
-    while a < end:
-        bounds.append((a, min(a + seg, end)))
-        a += seg
-    with ThreadPoolExecutor(workers) as ex:
-        for fut in [ex.submit(crawl, a, b) for a, b in bounds]:
-            fut.result()
-    msgs.sort(key=lambda m: m["t"])
-    f.write_text("\n".join(json.dumps(m, ensure_ascii=False) for m in msgs))
-    done.write_text(FAST_VERSION if fast else CACHE_VERSION)
-    return msgs
+    def crawl(self, ranges, stage, adaptive=True):
+        """ranges: list of (a, b) offsets, crawled in order by the worker pool."""
+        total = sum(max(0.0, b - a) for a, b in ranges) or 1.0
+        done = [0.0]
+
+        def one(a, b):
+            t = a
+            while t < b - 1e-6:
+                self.fetch(t, adaptive)
+                t = max(t + WIN, self.cov.end_of(t))
+                with self.lock:
+                    done[0] = min(total, done[0] + WIN)
+                self._note(stage, done[0], total)
+        with ThreadPoolExecutor(self.workers) as ex:
+            for fut in [ex.submit(one, a, b) for a, b in ranges]:
+                fut.result()
+
+    # ------------------------------------------------------------------ modes
+    def full(self):
+        seg = max(60.0, self.vod.duration / 60)
+        ranges, a = [], 0.0
+        while a < self.vod.duration:
+            ranges.append((a, min(a + seg, self.vod.duration)))
+            a += seg
+        self.crawl(ranges, "tam", adaptive=True)
+        return ChatData(sorted(self.msgs, key=lambda m: m["t"]), self.cov, True, [])
+
+    def smart(self, n_regions: int | None = None):
+        """Stage 1: one 5 s window out of every COARSE_EVERY. Stage 2: crawl densely only around the
+        strongest candidates. Peaks are decided by the dense data, so the top moments match a full crawl
+        (measured on real VODs: top-10 within one moment of a full crawl) at about a third of the requests."""
+        from . import peaks
+        dur = self.vod.duration
+        if n_regions is None:      # tuned on a real 6 h VOD (59k messages): ~1/3 of the requests, top-10 intact
+            n_regions = max(14, min(60, int(0.3 * dur / (2 * REGION_PAD))))
+        starts = [i * WIN for i in range(0, int(dur // WIN) + 1, COARSE_EVERY)]
+        self.crawl([(s, s + WIN) for s in starts if s < dur], "örnekleme", adaptive=False)
+        coarse = peaks.coarse_candidates(self.msgs, starts, dur, n_regions)
+        ranges = [(max(0.0, c - REGION_PAD), min(dur, c + REGION_PAD)) for c in coarse]
+        self.crawl(ranges, "yoğun bölgeler", adaptive=True)
+        return ChatData(sorted(self.msgs, key=lambda m: m["t"]), self.cov, False, starts)
+
+    def close(self):
+        self.fh.close()
+
+
+def fetch_chat(vod: Vod, cache_dir: Path, progress=None, mode: str = "smart", workers: int = WORKERS) -> ChatData:
+    """mode: "smart" (default, fast) or "full" (every window, complete). Resumable; cache shared by both."""
+    c = Chat(vod, cache_dir, progress, workers)
+    try:
+        return c.full() if mode == "full" else c.smart()
+    finally:
+        c.close()
 
 
 def _parse_ts(s: str) -> float:

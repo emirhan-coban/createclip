@@ -30,7 +30,8 @@ def main(argv=None):
                    help="an bulma kaynağı (auto: sohbet, olmazsa ses)")
     r.add_argument("--at", action="append", default=[], metavar="ZAMAN",
                    help="elle klip: '1:44:50' (45 sn) veya '1:44:50-1:45:40'; birden fazla verilebilir")
-    r.add_argument("--full-chat", action="store_true", help="sohbeti eksiksiz indir (~19,6 dk; varsayılan hızlı mod ~18,4 dk, mesajların %%98'i)")
+    r.add_argument("--full-chat", action="store_true",
+                   help="sohbeti eksiksiz indir (varsayılan: akıllı mod, seyrek örnekleme + yoğun bölgeler)")
     r.add_argument("--vocab", default="", help="isteğe bağlı özel kelimeler (örn. 'Berk, Derbeder'); "
                    "kısa tut, uzun liste konuşmanın atlanmasına yol açabilir")
     r.add_argument("--size", type=float, help="altyazı boyutu (genişliğin oranı, örn. 0.06)")
@@ -54,7 +55,7 @@ def main(argv=None):
                                     "chunk": a.chunk, "sync": a.sync},
                              min_len=a.min_len, max_len=a.max_len, max_height=a.max_height,
                              layout={"mode": a.layout, "cells": layoutmod.default_cells(a.layout)},
-                             snap=not a.no_snap, source=a.source, at=a.at, vocab=a.vocab, full_chat=a.full_chat)
+                             snap=not a.no_snap, source=a.source, at=a.at, vocab=a.vocab, chat_mode="full" if a.full_chat else "smart")
         try:
             m = pipeline.run(a.url, a.out, o, _progress)
         except Exception as e:  # noqa: BLE001

@@ -27,7 +27,8 @@ class JobReq(BaseModel):
     at: list[str] = Field(default_factory=list)
     snap: bool = True
     vocab: str = ""
-    full_chat: bool = False
+    full_chat: bool = False          # legacy flag; same as chat_mode="full"
+    chat_mode: str = "smart"
     style: dict = Field(default_factory=dict)     # size, ypos, chunk, active, color, stroke, upper, sync ...
     min_len: float = 25
     max_len: float = 60
@@ -64,9 +65,9 @@ def make_app(root: Path) -> FastAPI:
     tasks: dict[str, dict] = {}
     busy = threading.Lock()   # one heavy task at a time (whisper + ffmpeg)
 
-    def spawn(fn, *a, **kw) -> str:
+    def spawn(fn, *a, label: str = "", **kw) -> str:
         tid = uuid.uuid4().hex[:8]
-        t = tasks[tid] = {"status": "running", "stage": "queued", "frac": 0, "msg": "Sırada"}
+        t = tasks[tid] = {"status": "running", "stage": "queued", "frac": 0, "msg": "Sırada", "label": label}
 
         def prog(stage, frac, msg=""):
             t.update(stage=stage, frac=round(frac, 3), msg=msg)
@@ -92,6 +93,13 @@ def make_app(root: Path) -> FastAPI:
     def index():
         return HTML.read_text()
 
+    @app.get("/api/tasks")
+    def task_list():
+        """All known tasks (running first) - lets a reopened page re-attach to a job that is still running."""
+        rows = [{"id": k, **{x: v.get(x) for x in ("status", "stage", "frac", "msg", "label", "error")}}
+                for k, v in tasks.items()]
+        return sorted(rows, key=lambda r: r["status"] != "running")
+
     @app.get("/api/tasks/{tid}")
     def task(tid: str):
         if tid not in tasks:
@@ -105,12 +113,13 @@ def make_app(root: Path) -> FastAPI:
             style={**req.style, "font": req.font, "mask": req.mask},
             min_len=req.min_len, max_len=req.max_len, lead=req.lead, max_height=req.max_height,
             layout={"mode": req.layout, "cells": layoutmod.default_cells(req.layout)},
-            source=req.source, at=req.at, snap=req.snap, vocab=req.vocab, full_chat=req.full_chat)
+            source=req.source, at=req.at, snap=req.snap, vocab=req.vocab,
+            chat_mode="full" if (req.full_chat or req.chat_mode == "full") else "smart")
 
         def job(progress):
             m = pipeline.run(req.url, root, o, progress)
             return {"dir": Path(m["dir"]).name}
-        return {"id": spawn(job)}
+        return {"id": spawn(job, label=req.url)}
 
     @app.get("/api/projects")
     def projects():

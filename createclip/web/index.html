@@ -40,8 +40,8 @@ details{border-top:1px solid var(--line);padding:8px 0}summary{cursor:pointer;fo
   <input id="url" type="text" placeholder="https://kick.com/kanal/videos/...">
   <h3>Sohbet indirme (en iyi anları bulmak için)</h3>
   <div class="modes" id="modes">
-    <div class="mode sel" data-v="fast"><b>Hızlı sohbet · ≈18 dk</b><span class="meta">Her 5 saniyeye bir istek. Ölçüm (2,5 saatlik yayın): 18 dk, mesajların %98'i. Çoğu yayın için yeterli.</span></div>
-    <div class="mode" data-v="full"><b>Tam sohbet · ≈20 dk</b><span class="meta">Yoğun anlar dahil tüm mesajlar. Ölçüm: 19,6 dk. Hızlıdan yalnızca ~1 dk uzun; Kick hız sınırı yüzünden sohbet bundan hızlı inmiyor.</span></div>
+    <div class="mode sel" data-v="smart"><b>Akıllı (önerilen)</b><span class="meta" id="smartdesc">Önce sohbetin seyrek bir örneğini alır, sonra yalnızca en hareketli bölgeleri ayrıntılı indirir. Ölçüm: 6 saatlik yayın ≈ 24 dk (tam indirme ≈ 57 dk); en iyi 5 an aynı, en iyi 10'un 9'u aynı çıktı. Yarıda kesilirse kaldığı yerden devam eder.</span></div>
+    <div class="mode" data-v="full"><b>Tam sohbet</b><span class="meta">Her 5 saniyelik pencere indirilir. Ölçüm: 2,5 saatlik yayın ≈ 20 dk, 6 saatlik yayın ≈ 57 dk. Kick yaklaşık 1,5 istek/sn'ye izin verir; daha hızlı indirilemez. Yarıda kesilirse kaldığı yerden devam eder.</span></div>
     <div class="mode" data-v="audio"><b>Ses seviyesi · sohbetsiz</b><span class="meta">Sohbet indirilmez; en düşük kalite VOD (~250 MB) indirilip ses yüksekliğine bakılır. Süre internet hızına bağlı. Sohbet tepkisini görmez, bağırışlı anları bulur.</span></div>
   </div>
   <div class="row"><label class="c">An kaynağı (sohbet seçiliyken) <select id="source"><option value="auto">Otomatik (sohbet, olmazsa ses)</option><option value="chat">Yalnız sohbet</option></select></label></div>
@@ -106,7 +106,7 @@ async function poll(tid,onProg){
 }
 
 // ---- new-project form
-let chatMode='fast';
+let chatMode='smart';
 document.querySelectorAll('#modes .mode').forEach(m=>m.onclick=()=>{chatMode=m.dataset.v;document.querySelectorAll('#modes .mode').forEach(x=>x.classList.toggle('sel',x===m));saveForm()});
 const STAGES=[['info','VOD bilgisi'],['chat','Sohbet'],['audio','Ses analizi'],['clips','Kesim'],['captions','Altyazı'],['layout','Yerleşim']];
 function showSteps(stage){
@@ -119,7 +119,7 @@ function getForm(){const f={chat:chatMode};for(const k in FIELDS)f[k]=$(FIELDS[k
 function setForm(f){
   for(const k in FIELDS)if(f[k]!==undefined)$(FIELDS[k]).value=f[k];
   for(const k in CHECKS)if(f[k]!==undefined)$(CHECKS[k]).checked=f[k];
-  if(f.chat){chatMode=f.chat;document.querySelectorAll('#modes .mode').forEach(x=>x.classList.toggle('sel',x.dataset.v===chatMode))}
+  if(f.chat){chatMode=f.chat==='fast'?'smart':f.chat;document.querySelectorAll('#modes .mode').forEach(x=>x.classList.toggle('sel',x.dataset.v===chatMode))}
   syncUi();
 }
 const BUILTIN={'Yatay klasik':{layout:'none',sz:0.052,szauto:true,yp:0.72,ch:'3'},
@@ -160,11 +160,19 @@ $('go').onclick=async()=>{
   const r=await api('/api/jobs','POST',body);
   if(!r.ok){$('msg').className='err';$('msg').textContent='İstek reddedildi';$('go').disabled=false;return}
   const {id}=await r.json();
+  follow(id);
+};
+async function follow(id){
+  $('go').disabled=true;$('msg').className='meta';
   const j=await poll(id,j=>{showSteps(j.stage);$('fill').style.width=Math.round((j.frac||0)*100)+'%';$('msg').textContent=(j.msg||'')});
   $('go').disabled=false;
   if(j.status==='done'){$('msg').textContent='Bitti';$('steps').innerHTML='';open_(j.result.dir);listProjects()}
-  else{$('msg').className='err';$('msg').textContent=j.error}
-};
+  else{$('msg').className='err';$('msg').textContent=j.error||'Bilinmeyen hata (sunucu günlüğüne bak)'}
+}
+async function reattach(){
+  try{const l=await (await api('/api/tasks')).json();const r=l.find(x=>x.status==='running'&&x.label&&x.label.includes('kick.com'));
+    if(r){$('msg').textContent='Çalışan işe bağlanıldı: '+r.label;follow(r.id)}}catch(e){}
+}
 async function listProjects(){
   const l=await (await api('/api/projects')).json();
   $('projects').style.display=l.length?'':'none';
@@ -284,6 +292,6 @@ function buildCells(c){
 }
 
 fillPresets();setForm(lget('cc_form',{}));pvUpdate();
-listProjects();
+listProjects();reattach();
 {const q=new URLSearchParams(location.search).get('p');if(q)open_(q)}
 </script></body></html>
