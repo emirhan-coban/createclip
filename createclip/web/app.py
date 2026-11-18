@@ -234,10 +234,16 @@ def make_app(root: Path) -> FastAPI:
             raise HTTPException(404, "klip yok")
         t = max(0.0, (rec["end"] - rec["start"]) / 2 if t is None else t)
         out = d / "frames" / f"{rec['name']}_{int(t * 10)}.jpg"
-        out.parent.mkdir(exist_ok=True)
         if not out.exists():
-            subprocess.run(["ffmpeg", "-y", "-v", "error", "-ss", f"{t:.2f}", "-i", str(d / rec["src"]),
-                            "-frames:v", "1", "-q:v", "3", str(out)], check=True)
+            src = d / rec["src"]
+            if not src.exists():
+                logmod.log.warning("kare istendi ama klip dosyası yok: %s", src)
+                raise HTTPException(404, "klip dosyası bulunamadı (silinmiş olabilir)")
+            out.parent.mkdir(exist_ok=True)
+            p = logmod.run(["ffmpeg", "-y", "-v", "error", "-ss", f"{t:.2f}", "-i", str(src),
+                            "-frames:v", "1", "-q:v", "3", str(out)], f"kare {name}/{rec['name']}", timeout=60)
+            if p.returncode or not out.exists():
+                raise HTTPException(500, "kare çıkarılamadı: " + (p.stderr or "").strip()[-200:])
         return FileResponse(out, media_type="image/jpeg")
 
     app.mount("/files", StaticFiles(directory=root / "output"), name="files")

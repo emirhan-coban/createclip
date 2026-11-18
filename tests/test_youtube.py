@@ -98,3 +98,17 @@ def test_audio_fallback_needs_confirmation(tmp_path, monkeypatch):
     # explicit chat-only never falls back
     with pytest.raises(youtube.YouTubeError):
         pipeline.run(vod.url, tmp_path, pipeline.Options(source="chat"))
+
+
+def test_frame_of_missing_clip_is_404_not_500(tmp_path):
+    from fastapi.testclient import TestClient
+    from createclip import pipeline
+    from createclip.web.app import make_app
+    jd = tmp_path / "output" / "p-1"
+    jd.mkdir(parents=True)
+    pipeline.save(jd, {"clips": [{"i": 1, "name": "clip_01", "src": "clips/clip_01.mp4", "start": 0, "end": 40}],
+                       "defaults": {}, "next_i": 2})
+    c = TestClient(make_app(tmp_path), raise_server_exceptions=False)
+    r = c.get("/api/projects/p-1/clips/1/frame")
+    assert r.status_code == 404 and "bulunamadı" in r.text
+    assert c.get("/api/projects/silinmis/clips/1/frame").status_code == 404
