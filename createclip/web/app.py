@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .. import layout as layoutmod, log as logmod, pipeline, transcribe
+from .. import layout as layoutmod, log as logmod, pipeline, review as reviewmod, transcribe, watch as watchmod
 
 HTML = Path(__file__).with_name("index.html")
 
@@ -36,6 +36,26 @@ class JobReq(BaseModel):
     min_len: float = 25
     max_len: float = 60
     lead: float = 20
+    max_height: int = 720
+
+
+class ReviewReq(BaseModel):
+    status: str | None = None
+    title: str | None = None
+    description: str | None = None
+    tags: list[str] | None = None
+
+
+class ExportReq(BaseModel):
+    platform: str = "shorts"
+
+
+class ChannelReq(BaseModel):
+    url: str
+    min_minutes: float = 30
+    backfill: int = 1
+    n: int = 5
+    layout: str = "none"
     max_height: int = 720
 
 
@@ -192,6 +212,88 @@ def make_app(root: Path) -> FastAPI:
         shutil.rmtree(d)
         return {"ok": True}
 
+    # ---- review inbox, ready packages
+    @app.get("/inbox", response_class=HTMLResponse)
+    def inbox_page():
+        return HTML.with_name("inbox.html").read_text()
+
+    @app.get("/api/inbox")
+    def inbox(status: str = "new"):
+        return reviewmod.inbox(root, status)
+
+    @app.post("/api/projects/{name}/clips/{i}/review")
+    def review_clip(name: str, i: int, req: ReviewReq):
+        d = _dir(name)
+        try:
+            return reviewmod.review(d, i, **req.model_dump())
+        except KeyError:
+            raise HTTPException(404, "klip yok")
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+
+    @app.post("/api/projects/{name}/clips/{i}/export")
+    def export_clip(name: str, i: int, req: ExportReq):
+        d = _dir(name)
+        try:
+            return reviewmod.export_pack(root, d, i, req.platform)
+        except KeyError:
+            raise HTTPException(404, "klip yok")
+        except (ValueError, FileNotFoundError) as e:
+            raise HTTPException(400, str(e))
+
+    # ---- channels + queue
+    @app.get("/api/channels")
+    def channels():
+        return watchmod.load_channels(root)
+
+    @app.post("/api/channels")
+    def channel_add(req: ChannelReq):
+        try:
+            opts = {"n": req.n, "max_height": req.max_height,
+                    "layout": {"mode": req.layout, "cells": layoutmod.default_cells(req.layout)}}
+            return watchmod.add_channel(root, req.url, min_minutes=req.min_minutes, backfill=req.backfill, options=opts)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+
+    @app.delete("/api/channels")
+    def channel_remove(url: str):
+        return {"ok": watchmod.remove_channel(root, url)}
+
+    @app.post("/api/projects/{name}/clips/{i}/save-profile")
+    def save_profile(name: str, i: int):
+        d = _dir(name)
+        m = pipeline.load(d)
+        try:
+            rec = pipeline.get_clip(m, i)
+            ch = watchmod.save_profile(root, m["slug"], rec["style"], rec["layout"], m.get("defaults", {}))
+        except KeyError:
+            raise HTTPException(404, f"'{m.get('slug')}' kanalı takip listende yok; önce \"Kanallar ve kuyruk\"tan ekle.")
+        return {"channel": ch["name"]}
+
+    @app.get("/api/queue")
+    def queue_list():
+        return watchmod.queue(root)
+
+    @app.post("/api/queue/{iid}/{action}")
+    def queue_action(iid: str, action: str):
+        try:
+            {"retry": watchmod.retry, "confirm": watchmod.confirm_audio, "rm": watchmod.remove_item}[action](root, iid)
+        except (KeyError, TypeError):
+            raise HTTPException(404, "kayıt/işlem yok")
+        return {"ok": True}
+
+    @app.post("/api/queue/run")
+    def queue_run():
+        """Scan the channels now and work through the queue (one task, shown like any other job)."""
+        def job(progress):
+            watchmod.recover_running(root)
+            watchmod.scan(root)
+            n = 0
+            while watchmod.process_one(root, progress):
+                n += 1
+            return {"dir": str(root / "output"), "processed": n}
+        return {"id": spawn(job, label="kuyruk")}
+
     @app.post("/api/preview-style")
     def preview_style(req: PreviewReq):
         from .. import captions
@@ -246,5 +348,7 @@ def make_app(root: Path) -> FastAPI:
                 raise HTTPException(500, "kare çıkarılamadı: " + (p.stderr or "").strip()[-200:])
         return FileResponse(out, media_type="image/jpeg")
 
+    (root / "ready").mkdir(exist_ok=True)
     app.mount("/files", StaticFiles(directory=root / "output"), name="files")
+    app.mount("/ready", StaticFiles(directory=root / "ready"), name="ready")
     return app

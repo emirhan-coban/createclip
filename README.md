@@ -83,7 +83,7 @@ flowchart LR
   H --> I[Web editörü]
 ```
 1. **Sohbet:** Kick'in resmi olmayan API'sinden `curl` ile, hız sınırının altında (≈1,5 istek/sn) indirilir ve istek istek diske yazılır. Bir istek ~5 sn'lik pencere ve en çok ~25
-   mesaj döndürür; `cursor` alanı mesaj atlattığı için kullanılmaz. Alınamazsa en düşük kaliteli VOD (~250 MB) indirilip ses seviyesi ölçülür.
+   mesaj döndürür; `cursor` alanı mesaj atlattığı için kullanılmaz. Alınamazsa ses seviyesine bakılır: YouTube'da yalnız ses akışı (112 dk için 38 MB, 13 sn), Kick'te ses-yalnız biçim olmadığından en düşük video (≈1,7 MB/dk); ses seviyesi ölçülür.
 2. **Pik:** 10 sn dilimlerde skor, ilk 2 dk / son 1 dk atlanır, pikler ≥90 sn arayla, pencere pikten 20 sn önce başlar (25-60 sn).
 3. **Kesim:** yalnız ilgili aralık (±10 sn pay) indirilir; kesim noktaları `silencedetect` ile en yakın konuşma arasına çekilir.
 4. **Altyazı:** ipucu (prompt) kullanılmaz: ölçümde uzun ipucu konuşmanın büyük kısmını atlatıyordu (69 yerine 27 kelime).
@@ -98,10 +98,36 @@ zamanları 5 klipte ses başlangıçlarıyla karşılaştırıldı: medyan sapma
 
 ## Geliştirme
 ```bash
-./.venv/bin/python -m pytest -q       # 30 test
+./.venv/bin/python -m pytest -q       # 44 test
 ```
 Dosyalar: `kick.py` (VOD + sohbet), `peaks.py`, `audio_peaks.py`, `clipper.py`, `transcribe.py`, `captions.py`, `layout.py`,
-`youtube.py`, `sources.py` (YouTube + platform seçimi), `ytdlp.py`, `log.py`, `pipeline.py` (iş akışı + düzenleme), `web/` (FastAPI + tek sayfa arayüz), `syncfix.py` (senkron ölçüm aracı).
+`youtube.py`, `sources.py` (YouTube + platform seçimi), `watch.py` (izleyici + kuyruk), `review.py` (onay kutusu + hazır paket), `ytdlp.py`, `log.py`, `pipeline.py` (iş akışı + düzenleme), `web/` (FastAPI + tek sayfa arayüz), `syncfix.py` (senkron ölçüm aracı).
+
+## Klip kanalı akışı (izleyici, kuyruk, onay kutusu)
+```bash
+./.venv/bin/createclip channels add kick.com/kanal -n 5 --layout blur --max-height 1080   # ya da youtube.com/@kanal
+./.venv/bin/createclip watch --every 6          # tara + işle + bekle (gece açık bırak); --once: bir kez
+./.venv/bin/createclip queue                    # durum; queue retry|confirm|rm <id>, queue clear
+./.venv/bin/createclip serve                    # http://127.0.0.1:8765/inbox  → onay kutusu
+```
+- **İzleyici:** kanalın biten yayınlarını `yt-dlp` ile listeler (Kick: `kick.com/<kanal>/videos`, YouTube: `/@kanal/streams`),
+  canlı/süresi 0 olanları ve `--min-minutes`'tan kısaları atlar, **yeni olanları** kuyruğa koyar. Kanalı ilk eklediğinde yalnızca en yeni
+  `--backfill` kadar yayın girer (tüm geçmiş değil). En eski önce işlenir: Kick resmi yardım sayfasına göre yayınları 7 gün (doğrulanmış
+  kanalda 30 gün) saklıyor, bu yüzden tarama aralığını bundan kısa tut (üçüncü taraf kaynaklar süreyi farklı veriyor).
+- **Kuyruk** (`output/queue.json`): durdurup başlatınca kaldığı yerden devam eder; hata 3 kez denenir; sohbet yoksa iş **"onay bekliyor"**
+  olur (tüm sesi indirmeden önce sorar), `queue confirm <id>` ya da arayüzdeki düğme.
+- **Onay kutusu** (`/inbox`): tüm projelerin klipleri skora göre; **A** onayla, **R** reddet, **S/J/K** gezin. Başlık/açıklama/etiket
+  önerisi kural tabanlıdır (ilk cümle, kaynak bağlantısı + zaman damgası, sık kelimeler; model kullanılmaz) ve düzenlenebilir.
+  Onaylanan klip **hazır pakete** aktarılır: `ready/<tarih>/<proje>_<klip>/` içinde `video.mp4`, `baslik.txt`, `aciklama.txt`,
+  `etiketler.txt`, `kapak.jpg`; platform sınırı/dikey değil uyarısı verir. **Otomatik yükleme yoktur** (YouTube'da denetimsiz API
+  projelerinin yüklemeleri özel kalır, TikTok'ta denetimsiz istemci yalnızca özel hesaba paylaşır; bunlar üçüncü taraf kaynaklardan, denenmedi).
+- **Kanal profili:** bir klibin altyazı stilini ve 9:16 yerleşimini editörde bir kez ayarla, klip kartındaki **Kanal profili yap** ile
+  o yayıncının sonraki tüm klipleri bu ayarla çıksın.
+
+> **Yeniden kullanım uyarısı.** YouTube, Ekim 2026'da Shorts önerilerini değiştirip başkasının klibini katkısız yeniden yükleyen kanalların
+> erişimini düşüreceğini duyurdu (ve "yalnızca sesli anlatım, küçük kurgu, şablonlu toplu düzenleme" özgün sayılmıyor). Yeniden kullanım
+> politikası izin alınsa bile geçerli ve kanal düzeyinde değerlendiriliyor. Bu araç kesim/altyazı/yerleşim otomasyonudur; kanalın
+> özgün katkısını (yorum, bağlam, derleme) senin eklemen gerekir. Ayrıntı ve güncel kurallar için YouTube Yardım'ı oku; bu hukuki tavsiye değildir.
 
 ## Günlük ve hata ayıklama
 Her şey `output/createclip.log` dosyasına yazılır (dönen dosya): çalışan her dış komut, çıkış kodu, süre ve hata çıktısının sonu.
@@ -111,6 +137,12 @@ uyarısı çıkar. Komut satırı: `createclip run … -v` (günlüğü ekrana d
 Bilinen takılmalar ve çözümleri (bu makinede gerçekten yaşandı): (1) `yt-dlp`'nin varsayılan bağlantısı "Downloading webpage"de
 sonsuza dek bekleyebilir; kod `--impersonate chrome` kullanır (`createclip/ytdlp.py`), 3 dk zaman aşımı vardır.
 (2) Whisper modeli diskte olsa da Hugging Face'e güncelleme sorusu IPv6'da takılabilir; önbellekteki model çevrimdışı yüklenir.
+
+## Görüntü kalitesi
+YouTube'da ≤720p tek parça (ses+video birlikte) yalnızca 360p'dir; eski seçici bu yüzden 360p indiriyordu (ölçüldü: biçim 18, 640×360).
+Artık H.264 ayrı video+ses akışları birleştirilir (denendi: 720p60 → 1280×720 60 fps h264+aac, görüntü/ses süreleri eşit; Kick'te
+720p60/1080p60). Dikey (9:16) yerleşimde kaynak kırpılıp büyütüldüğü için 1080p önerilir (arayüz uyarır). Klip iki kez yeniden kodlanır
+(kesim crf 18, altyazı bindirme crf 20); bunun görsel etkisi ölçülmedi.
 
 ## Sınırlar
 - Kick sohbet API'si resmi değil; değişirse kırılabilir. VOD'lar Kick'te süreli saklanır.

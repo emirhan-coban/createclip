@@ -90,6 +90,17 @@ details{border-top:1px solid var(--line);padding:8px 0}summary{cursor:pointer;fo
   </details>
 </div>
 
+<div class="card" id="queuecard">
+  <h2>2 · Kanallar ve kuyruk <a href="/inbox" style="font-size:13px;font-weight:400;margin-left:8px">Onay kutusu →</a></h2>
+  <p class="meta" style="margin:0 0 6px">Takip ettiğin yayıncıları ekle; yeni biten yayınlar kuyruğa girer ve sırayla işlenir. Her gece otomatik için terminalde <code>createclip watch</code> çalıştır, ya da buradan "Şimdi tara ve işle"ye bas.</p>
+  <div class="row"><input type="text" id="churl" placeholder="kick.com/kanal  veya  youtube.com/@kanal" style="flex:1;min-width:220px">
+    <label class="c">≥ <input type="number" id="chmin" value="30" min="5" style="width:70px"> dk</label>
+    <button class="g" id="chadd">Kanalı ekle</button></div>
+  <div id="chlist"></div>
+  <div class="row"><button id="qrun">Şimdi tara ve işle</button><span class="meta" id="qmsg"></span></div>
+  <div id="qlist"></div>
+</div>
+
 <div class="card" id="projects" style="display:none"><h2>Önceki projeler</h2><div id="plist"></div></div>
 <div id="out"></div>
 </main>
@@ -198,6 +209,27 @@ async function follow(id){
 const resHint=()=>{$('reshint').style.display=($('layout').value!=='none'&&+$('res').value<1080)?'inline':'none'};
 ['layout','res'].forEach(k=>$(k).addEventListener('change',resHint));resHint();
 $('url').addEventListener('input',()=>{$('ytnote').style.display=/youtube\.com|youtu\.be/.test($('url').value)?'block':'none'});
+async function loadQueue(){
+  try{
+    const ch=await (await api('/api/channels')).json();
+    $('chlist').innerHTML=ch.map(c=>`<div class="proj"><span class="t">${esc(c.name)} <span class="meta">≥ ${c.min_minutes} dk</span></span><button class="d" data-u="${esc(c.url)}">Sil</button></div>`).join('');
+    $('chlist').querySelectorAll('button').forEach(b=>b.onclick=async()=>{await api('/api/channels?url='+encodeURIComponent(b.dataset.u),'DELETE');loadQueue()});
+    const q=await (await api('/api/queue')).json();
+    const L={pending:'bekliyor',running:'çalışıyor',done:'hazır',error:'hata',confirm_audio:'onay bekliyor',skipped:'atlandı'};
+    $('qlist').innerHTML=q.slice().reverse().slice(0,12).map(i=>`<div class="proj"><span class="t">${esc(i.title||i.url)} <span class="meta">· ${(i.duration/3600).toFixed(1)} sa · <b class="${i.status==='error'?'err':i.status==='done'?'ok':''}">${L[i.status]||i.status}</b>${i.error?' · '+esc(i.error).slice(0,120):''}</span></span>`+
+      (i.status==='confirm_audio'?`<button data-a="confirm" data-i="${i.id}">Ses analiziyle devam (~${i.est_mb} MB)</button>`:'')+
+      (i.status==='error'?`<button class="g" data-a="retry" data-i="${i.id}">Tekrar dene</button>`:'')+
+      `<button class="d" data-a="rm" data-i="${i.id}">Kaldır</button></div>`).join('')||'<p class="meta">Kuyruk boş.</p>';
+    $('qlist').querySelectorAll('button').forEach(b=>b.onclick=async()=>{await api(`/api/queue/${b.dataset.i}/${b.dataset.a}`,'POST');loadQueue()});
+  }catch(e){}
+}
+$('chadd').onclick=async()=>{
+  const r=await api('/api/channels','POST',{url:$('churl').value.trim(),min_minutes:+$('chmin').value});
+  if(r.ok){$('churl').value='';$('qmsg').textContent=''}else{$('qmsg').className='meta err';$('qmsg').textContent=(await r.json()).detail||'Hata'}
+  loadQueue();
+};
+$('qrun').onclick=async()=>{$('qrun').disabled=true;$('qmsg').className='meta';$('qmsg').textContent='Çalışıyor… (ilerleme üstteki çubukta)';
+  const r=await api('/api/queue/run','POST');const {id}=await r.json();await follow(id);$('qrun').disabled=false;$('qmsg').textContent='';loadQueue()};
 async function reattach(){
   try{const l=await (await api('/api/tasks')).json();const r=l.find(x=>x.status==='running'&&x.label&&/kick\.com|youtu/.test(x.label));
     if(r){$('msg').textContent='Çalışan işe bağlanıldı: '+r.label;follow(r.id)}}catch(e){}
@@ -265,7 +297,7 @@ function clipCard(c,f){
      <div class="meta" id="lh${c.i}">Kaynak karede tıklayarak pencerenin merkezini seç; yakınlaştırmayı kaydırıcıyla ayarla.</div>
      <div class="lay"><div><canvas id="src${c.i}" width="480" height="270" onclick="pick(event,${c.i})"></canvas><div class="row" id="cells${c.i}"></div></div><canvas id="res${c.i}" width="202" height="360"></canvas></div>
    </details>
-   <div class="row"><button onclick="apply(${c.i})">Uygula</button><button class="d" onclick="del(${c.i})">Klibi sil</button><span id="m${c.i}" class="meta"></span></div>
+   <div class="row"><button onclick="apply(${c.i})">Uygula</button><button class="g" onclick="profile(${c.i})" title="Bu klibin altyazı stili, 9:16 yerleşimi ve kalitesi, bu yayıncının sonraki tüm klipleri için kullanılır">Kanal profili yap</button><button class="d" onclick="del(${c.i})">Klibi sil</button><span id="m${c.i}" class="meta"></span></div>
    <div class="bar"><i id="p${c.i}"></i></div>
   </div></div></div>`;
 }
@@ -288,6 +320,10 @@ function apply(i){
            active:$('ac'+i).value,color:$('co'+i).value,mask:$('mk'+i).checked,stroke:+$('stk'+i).value,upper:$('up'+i).checked,sync:+$('sy'+i).value}};
   if($('t'+i))body.text=$('t'+i).value;
   task(`/api/projects/${project}/clips/${i}`,'POST',body,$('m'+i),$('p'+i));
+}
+async function profile(i){
+  const r=await api(`/api/projects/${project}/clips/${i}/save-profile`,'POST');const j=await r.json();
+  $('m'+i).className=r.ok?'meta ok':'meta err';$('m'+i).textContent=r.ok?`Kaydedildi: ${j.channel} kanalının sonraki klipleri bu ayarla çıkar`:(j.detail||'Hata');
 }
 async function del(i){if(!confirm('Bu klip ve dosyaları silinsin mi?'))return;await api(`/api/projects/${project}/clips/${i}`,'DELETE');open_(project)}
 
@@ -321,6 +357,6 @@ function buildCells(c){
 }
 
 fillPresets();setForm(lget('cc_form',{}));pvUpdate();
-listProjects();reattach();
+listProjects();reattach();loadQueue();
 {const q=new URLSearchParams(location.search).get('p');if(q)open_(q)}
 </script></body></html>

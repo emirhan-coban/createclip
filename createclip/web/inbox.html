@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>createclip · Onay kutusu</title>
+<style>
+:root{--bg:#fff;--fg:#17171a;--mut:#6b6b76;--card:#f4f4f7;--line:#dcdce3;--acc:#2f6bff;--bad:#d33;--ok:#2a9d57}
+@media(prefers-color-scheme:dark){:root{--bg:#121214;--fg:#ececf0;--mut:#9a9aa6;--card:#1c1c20;--line:#2c2c33;--bad:#ff6b6b}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,sans-serif}
+main{max-width:1040px;margin:0 auto;padding:24px 16px 80px}
+h1{font-size:22px;margin:0 0 4px}.meta{color:var(--mut);font-size:13px}a{color:var(--acc)}
+.tabs{display:flex;gap:6px;margin:14px 0}.tabs button{background:transparent;color:var(--fg);border:1px solid var(--line);border-radius:99px;padding:4px 14px;font:inherit;cursor:pointer}
+.tabs button.on{background:var(--acc);color:#fff;border-color:var(--acc)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}
+.two{display:grid;grid-template-columns:minmax(0,320px) minmax(0,1fr);gap:20px}@media(max-width:760px){.two{grid-template-columns:1fr}}
+video{width:100%;max-height:560px;border-radius:8px;background:#000}
+input[type=text],textarea,select{width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg);font:inherit}
+textarea{min-height:120px;resize:vertical}label{display:block;font-size:12px;color:var(--mut);margin:10px 0 3px}
+button.b{border:0;border-radius:8px;padding:9px 16px;font:inherit;cursor:pointer;color:#fff}
+.ok{background:var(--ok)}.no{background:var(--bad)}.sk{background:transparent;color:var(--fg);border:1px solid var(--line)!important}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:14px}
+.badge{display:inline-block;background:var(--acc);color:#fff;border-radius:99px;padding:0 10px;font-size:12px;font-weight:600;margin-right:6px}
+.sc{height:5px;background:var(--line);border-radius:3px;margin:6px 0 10px;overflow:hidden}.sc i{display:block;height:100%;background:var(--ok)}
+kbd{border:1px solid var(--line);border-radius:4px;padding:0 5px;font-size:12px}
+.warn{color:var(--bad);font-size:13px}
+</style></head><body><main>
+<h1>Onay kutusu</h1>
+<p class="meta"><a href="/">← Yeni proje / kuyruk</a> · Klavye: <kbd>A</kbd> onayla · <kbd>R</kbd> reddet · <kbd>S</kbd> sonra · <kbd>J</kbd>/<kbd>K</kbd> gezin · <kbd>Boşluk</kbd> oynat</p>
+<div class="tabs" id="tabs"></div>
+<div id="view"></div>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const api=(u,m='GET',b)=>fetch(u,{method:m,headers:{'Content-Type':'application/json'},body:b?JSON.stringify(b):undefined});
+const TABS=[['new','Bekleyenler'],['approved','Onaylananlar'],['rejected','Reddedilenler']];
+let tab='new',rows=[],cur=0,counts={};
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+async function load(){
+  rows=await (await api('/api/inbox?status='+tab)).json();
+  cur=Math.min(cur,Math.max(0,rows.length-1));
+  const all=await (await api('/api/inbox?status=all')).json();
+  counts={new:0,approved:0,rejected:0};all.forEach(r=>counts[r.status]=(counts[r.status]||0)+1);
+  $('tabs').innerHTML='';
+  TABS.forEach(([k,l])=>{const b=document.createElement('button');b.textContent=`${l} (${counts[k]||0})`;b.className=k===tab?'on':'';b.onclick=()=>{tab=k;cur=0;load()};$('tabs').append(b)});
+  render();
+}
+function render(){
+  const v=$('view');
+  if(!rows.length){v.innerHTML='<div class="card meta">Bu sekmede klip yok. Yeni klipler kuyruktan veya "Yeni proje"den gelir.</div>';return}
+  const r=rows[cur],best=Math.max(...rows.map(x=>x.score))||1;
+  v.innerHTML=`<div class="card"><div class="meta">${cur+1} / ${rows.length} · ${esc(r.slug)} · ${esc(r.source_title)}</div>
+  <div class="two"><div><video id="vid" src="${r.video}" controls playsinline></video></div>
+  <div><span class="badge">skor ${r.score}</span><span class="meta">${r.length} sn · yayında ${fmt(r.start)}</span>
+  <div class="sc"><i style="width:${Math.round(100*r.score/best)}%"></i></div>
+  <label>Başlık</label><input type="text" id="t" value="${esc(r.title)}">
+  <label>Açıklama (kaynak bağlantısı otomatik eklenir)</label><textarea id="d">${esc(r.description)}</textarea>
+  <label>Etiketler (virgülle)</label><input type="text" id="g" value="${esc(r.tags.join(', '))}">
+  <div class="row"><button class="b ok" id="ba">Onayla (A)</button><button class="b no" id="br">Reddet (R)</button><button class="b sk" id="bs">Sonra (S)</button>
+  ${r.status==='approved'?'<select id="pf"><option value="shorts">YouTube Shorts</option><option value="reels">Instagram Reels</option><option value="tiktok">TikTok</option></select><button class="b" id="be" style="background:var(--acc)">Hazır pakete aktar</button>':''}</div>
+  <div id="res" class="meta" style="margin-top:10px">${r.exported?'Aktarıldı: '+esc(r.exported.dir):''}</div></div></div></div>`;
+  ['t','d','g'].forEach(k=>$(k).addEventListener('change',save));
+  $('ba').onclick=()=>decide('approved');$('br').onclick=()=>decide('rejected');$('bs').onclick=()=>go(1);
+  if($('be'))$('be').onclick=doExport;
+}
+function fmt(s){s=Math.round(s);return`${Math.floor(s/3600)}:${String(Math.floor(s%3600/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`}
+async function save(){
+  const r=rows[cur];if(!r)return;
+  r.title=$('t').value;r.description=$('d').value;r.tags=$('g').value.split(',').map(x=>x.trim()).filter(Boolean);
+  await api(`/api/projects/${r.project}/clips/${r.i}/review`,'POST',{title:r.title,description:r.description,tags:r.tags});
+}
+async function decide(status){
+  const r=rows[cur];if(!r)return;await save();
+  await api(`/api/projects/${r.project}/clips/${r.i}/review`,'POST',{status});
+  await load();
+}
+function go(d){if(!rows.length)return;cur=(cur+d+rows.length)%rows.length;render()}
+async function doExport(){
+  const r=rows[cur];$('res').textContent='Hazırlanıyor…';await save();
+  const x=await api(`/api/projects/${r.project}/clips/${r.i}/export`,'POST',{platform:$('pf').value});
+  const j=await x.json();
+  if(!x.ok){$('res').innerHTML='<span class="warn">'+esc(j.detail||'Hata')+'</span>';return}
+  $('res').innerHTML='Hazır: <b>'+esc(j.dir)+'</b>'+(j.warnings.length?'<div class="warn">'+j.warnings.map(esc).join('<br>')+'</div>':'');
+}
+document.addEventListener('keydown',e=>{
+  if(['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName))return;
+  const k=e.key.toLowerCase();
+  if(k==='a'&&tab==='new')decide('approved');else if(k==='r'&&tab==='new')decide('rejected');
+  else if(k==='s'||k==='j')go(1);else if(k==='k')go(-1);
+  else if(k===' '){e.preventDefault();const v=$('vid');if(v)v.paused?v.play():v.pause()}
+});
+load();
+</script></body></html>

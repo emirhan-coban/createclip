@@ -2,7 +2,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from . import layout as layoutmod, log as logmod, pipeline
+from . import doctor as doctormod, layout as layoutmod, log as logmod, pipeline, watch as watchmod
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -53,6 +53,31 @@ def main(argv=None):
     lg.add_argument("-n", type=int, default=80, help="kaç satır")
     lg.add_argument("--out", type=Path, default=ROOT)
 
+    dc = sub.add_parser("doctor", help="kurulumu kontrol et (araçlar, model, disk, ağ)")
+    dc.add_argument("--no-net", action="store_true", help="ağ kontrolünü atla")
+    dc.add_argument("--out", type=Path, default=ROOT)
+
+    ch = sub.add_parser("channels", help="izlenen kanalları yönet (add / list / rm)")
+    ch.add_argument("action", choices=["add", "list", "rm"])
+    ch.add_argument("url", nargs="?", help="kick.com/<kanal> veya youtube.com/@<kanal>")
+    ch.add_argument("--min-minutes", type=float, default=30, help="bundan kısa yayınlar atlanır")
+    ch.add_argument("--backfill", type=int, default=1, help="ilk eklemede kaç eski yayın kuyruğa girsin")
+    ch.add_argument("-n", type=int, default=5, help="yayın başına klip sayısı")
+    ch.add_argument("--layout", choices=["none", "blur", "crop", "stack"], default="none")
+    ch.add_argument("--max-height", type=int, default=720, choices=[480, 720, 1080])
+    ch.add_argument("--out", type=Path, default=ROOT)
+
+    w = sub.add_parser("watch", help="kanalları tara, yeni yayınları işle (gece çalıştırmak için)")
+    w.add_argument("--every", type=float, default=6.0, help="tarama aralığı (saat)")
+    w.add_argument("--once", action="store_true", help="bir kez tara + kuyruğu bitir, çık")
+    w.add_argument("-v", "--verbose", action="store_true")
+    w.add_argument("--out", type=Path, default=ROOT)
+
+    qu = sub.add_parser("queue", help="kuyruk: list / retry <id> / confirm <id> / rm <id> / clear")
+    qu.add_argument("action", choices=["list", "retry", "confirm", "rm", "clear"], nargs="?", default="list")
+    qu.add_argument("id", nargs="?")
+    qu.add_argument("--out", type=Path, default=ROOT)
+
     s = sub.add_parser("serve", help="yerel web arayüzünü başlat")
     s.add_argument("-v", "--verbose", action="store_true", help="ayrıntılı günlüğü ekrana da yaz")
     s.add_argument("--port", type=int, default=8765)
@@ -63,6 +88,51 @@ def main(argv=None):
         print(logmod.tail(a.out / "output" / "createclip.log", a.n) or "(günlük boş)")
         return 0
     logfile = logmod.setup(a.out, getattr(a, "verbose", False))
+    if a.cmd == "doctor":
+        return doctormod.report(a.out, not a.no_net)
+    if a.cmd == "channels":
+        if a.action == "list":
+            for c in watchmod.load_channels(a.out):
+                print(f"{c['name']:24} {c['url']}  (>= {c['min_minutes']:g} dk, ilk eklemede {c['backfill']} yayın)")
+            return 0
+        if not a.url:
+            print("Kanal linki gerekli.", file=sys.stderr)
+            return 2
+        try:
+            if a.action == "add":
+                opts = {"n": a.n, "max_height": a.max_height,
+                        "layout": {"mode": a.layout, "cells": layoutmod.default_cells(a.layout)}}
+                c = watchmod.add_channel(a.out, a.url, min_minutes=a.min_minutes, backfill=a.backfill, options=opts)
+                print(f"Eklendi: {c['name']}  →  `createclip watch --once` ile tara")
+            else:
+                print("Silindi" if watchmod.remove_channel(a.out, a.url) else "Böyle bir kanal yok")
+        except ValueError as e:
+            print(f"Hata: {e}", file=sys.stderr)
+            return 1
+        return 0
+    if a.cmd == "queue":
+        if a.action == "list":
+            rows = watchmod.queue(a.out)
+            for i in rows:
+                print(f"{i['id']:14} {i['status']:13} {i['duration'] / 3600:5.1f}s  {i['title'][:46]:46} {i.get('project') or i.get('error') or ''}"[:200])
+            print(f"({len(rows)} kayıt)")
+        elif a.action == "clear":
+            for i in watchmod.queue(a.out):
+                if i["status"] in ("done", "skipped"):
+                    watchmod.remove_item(a.out, i["id"])
+        elif not a.id:
+            print("Kayıt numarası (id) gerekli.", file=sys.stderr)
+            return 2
+        else:
+            {"retry": watchmod.retry, "confirm": watchmod.confirm_audio, "rm": watchmod.remove_item}[a.action](a.out, a.id)
+        return 0
+    if a.cmd == "watch":
+        print(f"İzleniyor; günlük: {logfile}  (Ctrl-C ile durdur, tekrar başlatınca kaldığı yerden devam eder)")
+        try:
+            watchmod.loop(a.out, a.every, a.once, _progress)
+        except KeyboardInterrupt:
+            print("\nDurduruldu.")
+        return 0
     if a.cmd == "run":
         o = pipeline.Options(n=a.n, captions=a.captions, keep_plain=a.plain,
                              style={"font": a.font, "mask": a.mask_profanity, "size": a.size, "ypos": a.ypos,
