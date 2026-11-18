@@ -31,6 +31,7 @@ class JobReq(BaseModel):
     vocab: str = ""
     full_chat: bool = False          # legacy flag; same as chat_mode="full"
     chat_mode: str = "smart"
+    audio_ok: bool = False           # user confirmed the whole-video audio fallback
     style: dict = Field(default_factory=dict)     # size, ypos, chunk, active, color, stroke, upper, sync ...
     min_len: float = 25
     max_len: float = 60
@@ -100,7 +101,8 @@ def make_app(root: Path) -> FastAPI:
                 logmod.log.info("İş bitti: %s", label)
             except Exception as e:  # noqa: BLE001
                 logmod.log.error("İş başarısız: %s\n%s", e, traceback.format_exc())
-                t.update(status="error", error=str(e))
+                extra = {"code": "confirm_audio", "est_mb": e.est_mb} if isinstance(e, pipeline.NeedsAudioConfirm) else {}
+                t.update(status="error", error=str(e), **extra)
             finally:
                 logmod.log.removeHandler(h)
 
@@ -121,7 +123,7 @@ def make_app(root: Path) -> FastAPI:
     @app.get("/api/tasks")
     def task_list():
         """All known tasks (running first) - lets a reopened page re-attach to a job that is still running."""
-        rows = [{"id": k, **{x: v.get(x) for x in ("status", "stage", "frac", "msg", "label", "error", "stalled")}}
+        rows = [{"id": k, **{x: v.get(x) for x in ("status", "stage", "frac", "msg", "label", "error", "stalled", "code")}}
                 for k, v in tasks.items()]
         return sorted(rows, key=lambda r: r["status"] != "running")
 
@@ -143,7 +145,7 @@ def make_app(root: Path) -> FastAPI:
             min_len=req.min_len, max_len=req.max_len, lead=req.lead, max_height=req.max_height,
             layout={"mode": req.layout, "cells": layoutmod.default_cells(req.layout)},
             source=req.source, at=req.at, snap=req.snap, vocab=req.vocab,
-            chat_mode="full" if (req.full_chat or req.chat_mode == "full") else "smart")
+            chat_mode="full" if (req.full_chat or req.chat_mode == "full") else "smart", audio_ok=req.audio_ok)
 
         def job(progress):
             m = pipeline.run(req.url, root, o, progress)

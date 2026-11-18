@@ -45,6 +45,8 @@ def main(argv=None):
     r.add_argument("--no-snap", action="store_true", help="kesimleri konuşma aralarına hizalama")
     r.add_argument("--out", type=Path, default=ROOT, help="çıktı kök klasörü")
 
+    r.add_argument("--audio-fallback", action="store_true",
+                   help="sohbet yoksa ses analizine (tüm videoyu indirir) sormadan geç")
     r.add_argument("-v", "--verbose", action="store_true", help="ayrıntılı günlüğü ekrana da yaz")
 
     lg = sub.add_parser("logs", help="son günlük satırlarını göster")
@@ -69,7 +71,15 @@ def main(argv=None):
                              layout={"mode": a.layout, "cells": layoutmod.default_cells(a.layout)},
                              snap=not a.no_snap, source=a.source, at=a.at, vocab=a.vocab, chat_mode="full" if a.full_chat else "smart")
         try:
-            m = pipeline.run(a.url, a.out, o, _progress)
+            try:
+                m = pipeline.run(a.url, a.out, o, _progress)
+            except pipeline.NeedsAudioConfirm as e:
+                if a.audio_fallback or (sys.stdin.isatty() and input(f"{e}\nDevam edilsin mi? [e/H] ").strip().lower() in ("e", "evet", "y")):
+                    o.audio_ok = True
+                    m = pipeline.run(a.url, a.out, o, _progress)
+                else:
+                    print(f"{e}\nOnaylamak için --audio-fallback ekle (ya da --at ile elle zaman ver).", file=sys.stderr)
+                    return 2
         except Exception as e:  # noqa: BLE001
             logmod.log.exception("run başarısız")
             print(f"Hata: {e}\nAyrıntı: {logfile}  (createclip logs)", file=sys.stderr)

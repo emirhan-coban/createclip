@@ -24,7 +24,9 @@ Her klip web arayüzünde düzenlenebilir. Her şey yerelde çalışır (Apple S
 Biten YouTube canlı yayınları (ve sohbet tekrarı açık videolar) Kick ile aynı akıştan geçer: `createclip run "https://www.youtube.com/watch?v=…"`.
 Sohbet, `yt-dlp`'nin `live_chat` (chat replay) çıktısından tek seferde alınır (112 dk'lık bir yayında ölçüm: 4704 mesaj, 91 sn);
 Kick'teki istek sınırı yoktur, hızlı/tam ayrımı da yoktur. Sınırlar: hâlâ süren canlı yayın işlenmez (bitince dene); sohbet tekrarı
-kapalı videolarda (ör. bazı kurumsal kanallar) ses seviyesi moduna düşülür (bu yol YouTube'da denenmedi).
+kapalı videolarda (YouTube sayfasında "Live chat replay is not available" yazar; yayıncı kapatmış ya da kaldırılmış olabilir) ses
+seviyesi yedeği gerekir. Bu yedek tüm videoyu indirdiği için önce **onay istenir** (arayüzde düğme, komut satırında soru ya da
+`--audio-fallback`); tahmini boyut ~1,7 MB/dk (yalnızca tahmin). Yedek YouTube'da uçtan uca denenmedi. Bunun yerine `--at` ile elle zaman verilebilir.
 
 ## Gereksinimler
 `ffmpeg`, `yt-dlp`, `curl` (`brew install ffmpeg yt-dlp`), Python 3.10+. İlk altyazıda
@@ -96,7 +98,7 @@ zamanları 5 klipte ses başlangıçlarıyla karşılaştırıldı: medyan sapma
 
 ## Geliştirme
 ```bash
-./.venv/bin/python -m pytest -q       # 29 test
+./.venv/bin/python -m pytest -q       # 30 test
 ```
 Dosyalar: `kick.py` (VOD + sohbet), `peaks.py`, `audio_peaks.py`, `clipper.py`, `transcribe.py`, `captions.py`, `layout.py`,
 `youtube.py`, `sources.py` (YouTube + platform seçimi), `ytdlp.py`, `log.py`, `pipeline.py` (iş akışı + düzenleme), `web/` (FastAPI + tek sayfa arayüz), `syncfix.py` (senkron ölçüm aracı).

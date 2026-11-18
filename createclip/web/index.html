@@ -163,11 +163,15 @@ $('go').onclick=async()=>{
     font:$('font').value,mask:$('mask').checked,layout:$('layout').value,source:chatMode==='audio'?'audio':$('source').value,at,snap:$('snap').checked,
     vocab:$('vocab').value.trim(),full_chat:chatMode==='full',style:styleFromForm(),
     min_len:+$('minlen').value,max_len:+$('maxlen').value,lead:+$('lead').value,max_height:+$('res').value};
+  lastBody=body;await startJob(body);
+};
+let lastBody=null;
+async function startJob(body){
   const r=await api('/api/jobs','POST',body);
   if(!r.ok){$('msg').className='err';$('msg').textContent='İstek reddedildi';$('go').disabled=false;return}
   const {id}=await r.json();
   follow(id);
-};
+}
 function showLog(j){
   const st=$('stall');
   if(j.status==='running'&&j.stalled){st.style.display='block';st.textContent='⚠ '+j.stalled+' sn\'dir ilerleme yok ('+(j.msg||j.stage)+'). Takılmış olabilir; günlüğe bak.'}
@@ -181,6 +185,13 @@ async function follow(id){
   const j=await poll(id,j=>{showLog(j);showSteps(j.stage);$('fill').style.width=Math.round((j.frac||0)*100)+'%';$('msg').textContent=(j.msg||'')});
   $('go').disabled=false;
   if(j.status==='done'){$('msg').textContent='Bitti';$('steps').innerHTML='';open_(j.result.dir);listProjects()}
+  else if(j.code==='confirm_audio'&&lastBody){
+    $('msg').className='err';$('msg').innerHTML='';
+    const t=document.createElement('span');t.textContent=j.error+' ';
+    const b=document.createElement('button');b.textContent='Yine de ses analiziyle devam et (~'+j.est_mb+' MB)';
+    b.onclick=()=>{$('go').disabled=true;startJob({...lastBody,audio_ok:true})};
+    $('msg').append(t,b);
+  }
   else{$('msg').className='err';$('msg').textContent=j.error||'Bilinmeyen hata (sunucu günlüğüne bak)'}
 }
 $('url').addEventListener('input',()=>{$('ytnote').style.display=/youtube\.com|youtu\.be/.test($('url').value)?'block':'none'});

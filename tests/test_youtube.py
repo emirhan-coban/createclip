@@ -78,3 +78,23 @@ def test_task_buffer_and_api_log(tmp_path):
     assert j["status"] == "error" and "Desteklenen" in j["error"]
     assert any("başarısız" in line for line in j["log"])
     assert "Desteklenen" in c.get("/api/log").json()["text"]
+
+
+def test_audio_fallback_needs_confirmation(tmp_path, monkeypatch):
+    from createclip import pipeline
+    vod = kick.Vod("dQw4w9WgXcQ", "kanal", "t", 24894.0, 0, 0, "https://youtu.be/dQw4w9WgXcQ")
+    monkeypatch.setattr(pipeline.sources, "vod_info", lambda url: vod)
+
+    def no_chat(*a, **k):
+        raise youtube.YouTubeError("Sohbet tekrarı alınamadı: bu videoda sohbet tekrarı yok")
+    monkeypatch.setattr(pipeline.sources, "fetch_chat", no_chat)
+    with pytest.raises(pipeline.NeedsAudioConfirm) as ei:
+        pipeline.run(vod.url, tmp_path, pipeline.Options())
+    assert ei.value.est_mb == 705 and "onay" in str(ei.value)
+    # confirmed -> goes on to the audio path
+    monkeypatch.setattr(pipeline.audio_peaks, "find", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("AUDIO")))
+    with pytest.raises(RuntimeError, match="AUDIO"):
+        pipeline.run(vod.url, tmp_path, pipeline.Options(audio_ok=True))
+    # explicit chat-only never falls back
+    with pytest.raises(youtube.YouTubeError):
+        pipeline.run(vod.url, tmp_path, pipeline.Options(source="chat"))

@@ -12,6 +12,20 @@ from . import audio_peaks, captions, clipper, kick, layout as layoutmod, peaks, 
 CANDIDATES = 30
 
 
+class NeedsAudioConfirm(RuntimeError):
+    """Chat is unavailable; the only fallback (loudness from the audio) downloads the whole video, so ask first."""
+
+    def __init__(self, reason: str, est_mb: int):
+        super().__init__(f"{reason}. Ses analizi için videonun tamamı indirilir (tahmini ~{est_mb} MB); "
+                         f"onay gerekiyor.")
+        self.reason, self.est_mb = reason, est_mb
+
+
+def audio_estimate_mb(duration: float) -> int:
+    """Rough size of the lowest-quality rendition: ~1.7 MB/min (Kick: 250 MB for 2.5 h). An estimate only."""
+    return max(20, int(duration / 60 * 1.7))
+
+
 def _noop(stage, frac, msg=""):
     pass
 
@@ -30,6 +44,7 @@ class Options:
     snap: bool = True            # snap cuts to pauses in speech
     source: str = "auto"         # auto | chat | audio
     at: list = field(default_factory=list)   # manual clips: "1:44:50" or "1:44:50-1:45:40"
+    audio_ok: bool = False       # allow the whole-video audio fallback when chat is unavailable (source=auto)
     chat_mode: str = "smart"     # smart (sparse sampling + dense around candidates) | full (every window)
     vocab: str = ""              # optional names for the speech model, e.g. "Berk, Derbeder" (use sparingly)
 
@@ -271,9 +286,11 @@ def run(url: str, root: Path, opts: Options, progress=_noop) -> dict:
                 log.warning("sohbet alınamadı: %s", e)
                 if opts.source == "chat":
                     raise
+                if not opts.audio_ok:
+                    raise NeedsAudioConfirm(f"Sohbet alınamadı ({e})", audio_estimate_mb(vod.duration)) from e
                 progress("chat", 1.0, f"Sohbet alınamadı ({e}); ses seviyesine geçiliyor")
         if not found and opts.source in ("auto", "audio"):
-            progress("audio", 0, "Ses analizi için düşük kaliteli VOD indiriliyor (~250 MB)")
+            progress("audio", 0, f"Ses analizi için düşük kaliteli VOD indiriliyor (tahmini ~{audio_estimate_mb(vod.duration)} MB)")
             found = audio_peaks.find(url, jd, vod.duration, n=CANDIDATES, lead=opts.lead,
                                      min_len=opts.min_len, max_len=opts.max_len)
             source = "audio"
