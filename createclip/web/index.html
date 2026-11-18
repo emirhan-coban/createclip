@@ -53,6 +53,7 @@ details{border-top:1px solid var(--line);padding:8px 0}summary{cursor:pointer;fo
     <label class="c">Süre <input id="minlen" type="number" min="10" max="120" value="25" style="width:64px">–<input id="maxlen" type="number" min="15" max="180" value="60" style="width:64px"> sn</label>
     <label class="c">Pikten önce <input id="lead" type="number" min="0" max="60" value="20" style="width:64px"> sn</label>
     <label class="c">Çözünürlük <select id="res"><option value="480">480p</option><option value="720" selected>720p</option><option value="1080">1080p</option></select></label>
+    <span class="meta" id="reshint" style="display:none;align-self:center">⚠ Dikey (9:16) yerleşimde kaynak kırpılıp büyütülür; yatay 720p bulanık çıkabilir. 1080p önerilir.</span>
     <label class="c"><input id="snap" type="checkbox" checked> Kesimleri konuşma aralarına hizala</label>
   </div>
   <div class="row"><label class="c">Biçim <select id="layout"><option value="none">Yatay (16:9)</option><option value="blur">9:16 · bulanık arka plan</option><option value="crop">9:16 · tek pencere</option><option value="stack">9:16 · iki pencere</option></select></label>
@@ -194,6 +195,8 @@ async function follow(id){
   }
   else{$('msg').className='err';$('msg').textContent=j.error||'Bilinmeyen hata (sunucu günlüğüne bak)'}
 }
+const resHint=()=>{$('reshint').style.display=($('layout').value!=='none'&&+$('res').value<1080)?'inline':'none'};
+['layout','res'].forEach(k=>$(k).addEventListener('change',resHint));resHint();
 $('url').addEventListener('input',()=>{$('ytnote').style.display=/youtube\.com|youtu\.be/.test($('url').value)?'block':'none'});
 async function reattach(){
   try{const l=await (await api('/api/tasks')).json();const r=l.find(x=>x.status==='running'&&x.label&&/kick\.com|youtu/.test(x.label));

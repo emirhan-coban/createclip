@@ -21,9 +21,11 @@ class NeedsAudioConfirm(RuntimeError):
         self.reason, self.est_mb = reason, est_mb
 
 
-def audio_estimate_mb(duration: float) -> int:
-    """Rough size of the lowest-quality rendition: ~1.7 MB/min (Kick: 250 MB for 2.5 h). An estimate only."""
-    return max(20, int(duration / 60 * 1.7))
+def audio_estimate_mb(duration: float, platform: str = "kick") -> int:
+    """Rough download size of the loudness fallback. Kick has no audio-only stream, its 160p video is ~1.7 MB/min
+    (read from yt-dlp's format list); YouTube has an audio-only stream at ~0.35 MB/min (112 min = 39 MiB for the
+    48 kbps m4a). Estimates only."""
+    return max(10, int(duration / 60 * (0.35 if platform == "youtube" else 1.7)))
 
 
 def _noop(stage, frac, msg=""):
@@ -287,10 +289,10 @@ def run(url: str, root: Path, opts: Options, progress=_noop) -> dict:
                 if opts.source == "chat":
                     raise
                 if not opts.audio_ok:
-                    raise NeedsAudioConfirm(f"Sohbet alınamadı ({e})", audio_estimate_mb(vod.duration)) from e
+                    raise NeedsAudioConfirm(f"Sohbet alınamadı ({e})", audio_estimate_mb(vod.duration, sources.platform(url))) from e
                 progress("chat", 1.0, f"Sohbet alınamadı ({e}); ses seviyesine geçiliyor")
         if not found and opts.source in ("auto", "audio"):
-            progress("audio", 0, f"Ses analizi için düşük kaliteli VOD indiriliyor (tahmini ~{audio_estimate_mb(vod.duration)} MB)")
+            progress("audio", 0, f"Ses analizi için düşük kaliteli VOD indiriliyor (tahmini ~{audio_estimate_mb(vod.duration, sources.platform(url))} MB)")
             found = audio_peaks.find(url, jd, vod.duration, n=CANDIDATES, lead=opts.lead,
                                      min_len=opts.min_len, max_len=opts.max_len)
             source = "audio"

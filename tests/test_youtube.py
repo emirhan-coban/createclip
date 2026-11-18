@@ -90,7 +90,7 @@ def test_audio_fallback_needs_confirmation(tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline.sources, "fetch_chat", no_chat)
     with pytest.raises(pipeline.NeedsAudioConfirm) as ei:
         pipeline.run(vod.url, tmp_path, pipeline.Options())
-    assert ei.value.est_mb == 705 and "onay" in str(ei.value)
+    assert ei.value.est_mb == 145 and "onay" in str(ei.value)
     # confirmed -> goes on to the audio path
     monkeypatch.setattr(pipeline.audio_peaks, "find", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("AUDIO")))
     with pytest.raises(RuntimeError, match="AUDIO"):
@@ -112,3 +112,12 @@ def test_frame_of_missing_clip_is_404_not_500(tmp_path):
     r = c.get("/api/projects/p-1/clips/1/frame")
     assert r.status_code == 404 and "bulunamadı" in r.text
     assert c.get("/api/projects/silinmis/clips/1/frame").status_code == 404
+
+
+def test_format_selector_prefers_hd_split_streams():
+    from createclip import clipper
+    f = clipper.format_selector(720)
+    first = f.split("/")[0]
+    assert first == "bv*[height<=720][vcodec^=avc1]+ba"          # separate H.264 video + audio first
+    assert f.endswith("/b") and "best[height" not in f           # old selector picked 360p progressive on YouTube
+    assert "height<=1080" in clipper.format_selector(1080)

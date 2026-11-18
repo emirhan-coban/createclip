@@ -25,6 +25,15 @@ def parse_time(s: str) -> float:
     return sec
 
 
+def format_selector(h: int) -> str:
+    """yt-dlp format for "best quality up to h px". YouTube only offers progressive (video+audio in one file)
+    up to 360p; 720p/1080p are separate video and audio streams, so `best[height<=h]` silently picked 360p there
+    (measured: format 18, 640x360). Prefer H.264 video + best audio merged by ffmpeg, then any codec, then a
+    progressive file. Kick serves combined HLS renditions, which the same string also resolves (720p60/1080p60)."""
+    return (f"bv*[height<={h}][vcodec^=avc1]+ba/b[height<={h}][vcodec^=avc1]/"
+            f"bv*[height<={h}]+ba/b[height<={h}]/b")
+
+
 def download_range(url: str, start: float, end: float, out: Path, max_height: int = 720) -> Path:
     out.parent.mkdir(parents=True, exist_ok=True)
     for old in out.parent.glob(out.stem + ".*"):
@@ -36,8 +45,8 @@ def download_range(url: str, start: float, end: float, out: Path, max_height: in
             old.unlink()
         try:
             p = run(
-                ytdlp.cmd("-q", "--socket-timeout", "30", "-f", f"best[height<={max_height}]/best",
-                 "--download-sections", f"*{hms(start)}-{hms(end)}", "--force-keyframes-at-cuts", "-o",
+                ytdlp.cmd("-q", "--socket-timeout", "30", "-f", format_selector(max_height),
+                 "--merge-output-format", "mp4", "--download-sections", f"*{hms(start)}-{hms(end)}", "--force-keyframes-at-cuts", "-o",
                  str(out.with_suffix("")) + ".%(ext)s", url), f"indirme {hms(start)}-{hms(end)} (deneme {attempt + 1})", timeout=240)
         except subprocess.TimeoutExpired:
             err = "indirme zaman aşımına uğradı"
