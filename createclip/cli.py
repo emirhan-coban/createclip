@@ -2,20 +2,21 @@ import argparse
 import sys
 from pathlib import Path
 
-from . import layout as layoutmod, pipeline
+from . import layout as layoutmod, log as logmod, pipeline
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
 def _progress(stage, frac, msg=""):
+    logmod.log.info("[%s] %d%% %s", stage, int(frac * 100), msg)
     print(f"[{stage:8}] {int(frac * 100):3d}%  {msg}", flush=True)
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(prog="createclip", description="Kick VOD -> klipler (+altyazı, 9:16)")
+    ap = argparse.ArgumentParser(prog="createclip", description="Kick / YouTube yayın kaydı -> klipler (+altyazı, 9:16)")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    r = sub.add_parser("run", help="Kick VOD linkinden klip üret")
+    r = sub.add_parser("run", help="Kick VOD veya YouTube (biten yayın) linkinden klip üret")
     r.add_argument("url")
     r.add_argument("-n", type=int, default=5, help="klip sayısı")
     r.add_argument("--captions", action=argparse.BooleanOptionalAction, default=True,
@@ -44,11 +45,22 @@ def main(argv=None):
     r.add_argument("--no-snap", action="store_true", help="kesimleri konuşma aralarına hizalama")
     r.add_argument("--out", type=Path, default=ROOT, help="çıktı kök klasörü")
 
+    r.add_argument("-v", "--verbose", action="store_true", help="ayrıntılı günlüğü ekrana da yaz")
+
+    lg = sub.add_parser("logs", help="son günlük satırlarını göster")
+    lg.add_argument("-n", type=int, default=80, help="kaç satır")
+    lg.add_argument("--out", type=Path, default=ROOT)
+
     s = sub.add_parser("serve", help="yerel web arayüzünü başlat")
+    s.add_argument("-v", "--verbose", action="store_true", help="ayrıntılı günlüğü ekrana da yaz")
     s.add_argument("--port", type=int, default=8765)
     s.add_argument("--out", type=Path, default=ROOT)
 
     a = ap.parse_args(argv)
+    if a.cmd == "logs":
+        print(logmod.tail(a.out / "output" / "createclip.log", a.n) or "(günlük boş)")
+        return 0
+    logfile = logmod.setup(a.out, getattr(a, "verbose", False))
     if a.cmd == "run":
         o = pipeline.Options(n=a.n, captions=a.captions, keep_plain=a.plain,
                              style={"font": a.font, "mask": a.mask_profanity, "size": a.size, "ypos": a.ypos,
@@ -59,7 +71,8 @@ def main(argv=None):
         try:
             m = pipeline.run(a.url, a.out, o, _progress)
         except Exception as e:  # noqa: BLE001
-            print(f"Hata: {e}", file=sys.stderr)
+            logmod.log.exception("run başarısız")
+            print(f"Hata: {e}\nAyrıntı: {logfile}  (createclip logs)", file=sys.stderr)
             return 1
         print(f"\nÇıktı klasörü: {m['dir']}  (kaynak: {m['source']})")
         for c in m["clips"]:
@@ -68,7 +81,7 @@ def main(argv=None):
     if a.cmd == "serve":
         import uvicorn
         from .web.app import make_app
-        print(f"http://127.0.0.1:{a.port}")
+        print(f"http://127.0.0.1:{a.port}   günlük: {logfile}")
         uvicorn.run(make_app(a.out), host="127.0.0.1", port=a.port, log_level="warning")
         return 0
 

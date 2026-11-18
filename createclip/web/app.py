@@ -1,4 +1,6 @@
 import io
+import time
+import traceback
 import shutil
 import subprocess
 import threading
@@ -10,7 +12,7 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .. import layout as layoutmod, pipeline, transcribe
+from .. import layout as layoutmod, log as logmod, pipeline, transcribe
 
 HTML = Path(__file__).with_name("index.html")
 
@@ -61,26 +63,49 @@ class AddReq(BaseModel):
 def make_app(root: Path) -> FastAPI:
     root = Path(root)
     (root / "output").mkdir(parents=True, exist_ok=True)
+    logfile = logmod.setup(root)
+    STALL = 120        # seconds without progress before a task is flagged as stalled
     app = FastAPI(title="createclip")
     tasks: dict[str, dict] = {}
     busy = threading.Lock()   # one heavy task at a time (whisper + ffmpeg)
 
     def spawn(fn, *a, label: str = "", **kw) -> str:
         tid = uuid.uuid4().hex[:8]
-        t = tasks[tid] = {"status": "running", "stage": "queued", "frac": 0, "msg": "Sırada", "label": label}
+        t = tasks[tid] = {"status": "running", "stage": "queued", "frac": 0, "msg": "Sırada", "label": label,
+                          "log": [], "stalled": 0, "last": time.time()}
 
         def prog(stage, frac, msg=""):
-            t.update(stage=stage, frac=round(frac, 3), msg=msg)
+            if stage != t["stage"] or abs(frac - t["frac"]) >= 0.2:
+                logmod.log.info("[%s] %d%% %s", stage, int(frac * 100), msg)
+            t.update(stage=stage, frac=round(frac, 3), msg=msg, last=time.time(), stalled=0)
+
+        def watchdog():
+            while t["status"] == "running":
+                time.sleep(5)
+                idle = time.time() - t["last"]
+                if t["status"] == "running" and idle > STALL and not t["stalled"]:
+                    logmod.log.warning("[%s] %d sn'dir ilerleme yok (%s) - takılmış olabilir", t["stage"], idle, t["msg"])
+                if idle > STALL:
+                    t["stalled"] = int(idle)
 
         def work():
+            h = logmod.TaskBuffer(t["log"])
+            logmod.log.addHandler(h)
             try:
                 with busy:
+                    t["last"] = time.time()
+                    logmod.log.info("İş başladı: %s", label)
                     res = fn(*a, progress=prog, **kw)
                 t.update(status="done", result=res)
+                logmod.log.info("İş bitti: %s", label)
             except Exception as e:  # noqa: BLE001
+                logmod.log.error("İş başarısız: %s\n%s", e, traceback.format_exc())
                 t.update(status="error", error=str(e))
+            finally:
+                logmod.log.removeHandler(h)
 
         threading.Thread(target=work, daemon=True).start()
+        threading.Thread(target=watchdog, daemon=True).start()
         return tid
 
     def _dir(name: str) -> Path:
@@ -96,9 +121,13 @@ def make_app(root: Path) -> FastAPI:
     @app.get("/api/tasks")
     def task_list():
         """All known tasks (running first) - lets a reopened page re-attach to a job that is still running."""
-        rows = [{"id": k, **{x: v.get(x) for x in ("status", "stage", "frac", "msg", "label", "error")}}
+        rows = [{"id": k, **{x: v.get(x) for x in ("status", "stage", "frac", "msg", "label", "error", "stalled")}}
                 for k, v in tasks.items()]
         return sorted(rows, key=lambda r: r["status"] != "running")
+
+    @app.get("/api/log")
+    def server_log(n: int = 200):
+        return {"file": str(logfile), "text": logmod.tail(logfile, max(1, min(n, 2000)))}
 
     @app.get("/api/tasks/{tid}")
     def task(tid: str):

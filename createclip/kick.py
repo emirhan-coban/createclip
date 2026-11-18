@@ -9,6 +9,9 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import ytdlp
+from .log import run
+
 UA = {"User-Agent": "Mozilla/5.0"}
 URL_RE = re.compile(r"kick\.com/([^/?#]+)/videos/([0-9a-fA-F-]{36})")
 
@@ -37,10 +40,14 @@ def parse_url(url: str):
 
 def vod_info(url: str) -> Vod:
     slug, vid = parse_url(url)
-    ytdlp = shutil.which("yt-dlp")
-    if not ytdlp:
-        raise KickError("yt-dlp bulunamadı (brew install yt-dlp).")
-    p = subprocess.run([ytdlp, "-J", "--skip-download", url], capture_output=True, text=True)
+    try:
+        cmd = ytdlp.cmd("-J", "--skip-download", url)
+    except ytdlp.YtDlpMissing as e:
+        raise KickError(str(e)) from e
+    try:
+        p = run(cmd, "kick bilgi", timeout=180)
+    except subprocess.TimeoutExpired:
+        raise KickError("VOD bilgisi 3 dk içinde gelmedi (ağ/Kick takıldı); tekrar dene.") from None
     if p.returncode != 0:
         raise KickError("VOD bilgisi alınamadı: " + p.stderr.strip()[-300:])
     d = json.loads(p.stdout)

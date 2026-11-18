@@ -5,6 +5,9 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from . import ytdlp
+from .log import run
+
 PAD = 10.0  # seconds of extra footage kept around a clip so edits can nudge without re-downloading
 
 
@@ -23,7 +26,6 @@ def parse_time(s: str) -> float:
 
 
 def download_range(url: str, start: float, end: float, out: Path, max_height: int = 720) -> Path:
-    ytdlp = shutil.which("yt-dlp")
     out.parent.mkdir(parents=True, exist_ok=True)
     for old in out.parent.glob(out.stem + ".*"):
         old.unlink()
@@ -33,10 +35,10 @@ def download_range(url: str, start: float, end: float, out: Path, max_height: in
         for old in out.parent.glob(out.stem + ".*"):
             old.unlink()
         try:
-            p = subprocess.run(
-                [ytdlp, "-q", "--socket-timeout", "30", "-f", f"best[height<={max_height}]/best",
+            p = run(
+                ytdlp.cmd("-q", "--socket-timeout", "30", "-f", f"best[height<={max_height}]/best",
                  "--download-sections", f"*{hms(start)}-{hms(end)}", "--force-keyframes-at-cuts", "-o",
-                 str(out.with_suffix("")) + ".%(ext)s", url], capture_output=True, text=True, timeout=240)
+                 str(out.with_suffix("")) + ".%(ext)s", url), f"indirme {hms(start)}-{hms(end)} (deneme {attempt + 1})", timeout=240)
         except subprocess.TimeoutExpired:
             err = "indirme zaman aşımına uğradı"
             continue

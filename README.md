@@ -1,9 +1,9 @@
 # createclip
 
-**Kick VOD linkini yapıştır → en iyi anları bulsun, klipleri kessin, Türkçe kelime kelime altyazı bassın, istersen 9:16'ya çevirsin.**
+**Kick VOD ya da biten bir YouTube yayınının linkini yapıştır → en iyi anları bulsun, klipleri kessin, Türkçe kelime kelime altyazı bassın, istersen 9:16'ya çevirsin.**
 Her klip web arayüzünde düzenlenebilir. Her şey yerelde çalışır (Apple Silicon Mac), buluta video veya ses yüklenmez.
 
-> *Paste a Kick VOD link → finds the best moments from chat activity, cuts clips, burns word-by-word Turkish captions
+> *Paste a Kick VOD or finished YouTube live-stream link → finds the best moments from chat activity, cuts clips, burns word-by-word Turkish captions
 > (local Whisper) and can reframe to 9:16. Local web editor + CLI.*
 
 ![Yeni proje formu](docs/img/new-project.png)
@@ -19,6 +19,12 @@ Her klip web arayüzünde düzenlenebilir. Her şey yerelde çalışır (Apple S
 | Altyazı fontları (önizleme) | 9:16 |
 |---|---|
 | ![Fontlar](docs/img/fonts.png) | ![Dikey](docs/img/portrait.png) |
+
+## YouTube desteği
+Biten YouTube canlı yayınları (ve sohbet tekrarı açık videolar) Kick ile aynı akıştan geçer: `createclip run "https://www.youtube.com/watch?v=…"`.
+Sohbet, `yt-dlp`'nin `live_chat` (chat replay) çıktısından tek seferde alınır (112 dk'lık bir yayında ölçüm: 4704 mesaj, 91 sn);
+Kick'teki istek sınırı yoktur, hızlı/tam ayrımı da yoktur. Sınırlar: hâlâ süren canlı yayın işlenmez (bitince dene); sohbet tekrarı
+kapalı videolarda (ör. bazı kurumsal kanallar) ses seviyesi moduna düşülür (bu yol YouTube'da denenmedi).
 
 ## Gereksinimler
 `ffmpeg`, `yt-dlp`, `curl` (`brew install ffmpeg yt-dlp`), Python 3.10+. İlk altyazıda
@@ -90,10 +96,19 @@ zamanları 5 klipte ses başlangıçlarıyla karşılaştırıldı: medyan sapma
 
 ## Geliştirme
 ```bash
-./.venv/bin/python -m pytest -q       # 23 test
+./.venv/bin/python -m pytest -q       # 29 test
 ```
 Dosyalar: `kick.py` (VOD + sohbet), `peaks.py`, `audio_peaks.py`, `clipper.py`, `transcribe.py`, `captions.py`, `layout.py`,
-`pipeline.py` (iş akışı + düzenleme), `web/` (FastAPI + tek sayfa arayüz), `syncfix.py` (senkron ölçüm aracı).
+`youtube.py`, `sources.py` (YouTube + platform seçimi), `ytdlp.py`, `log.py`, `pipeline.py` (iş akışı + düzenleme), `web/` (FastAPI + tek sayfa arayüz), `syncfix.py` (senkron ölçüm aracı).
+
+## Günlük ve hata ayıklama
+Her şey `output/createclip.log` dosyasına yazılır (dönen dosya): çalışan her dış komut, çıkış kodu, süre ve hata çıktısının sonu.
+Web'de ilerleme çubuğunun altındaki **Günlük** bölümü işin satırlarını canlı gösterir; 2 dk ilerleme olmazsa "takılmış olabilir"
+uyarısı çıkar. Komut satırı: `createclip run … -v` (günlüğü ekrana da yazar), `createclip logs -n 100`.
+
+Bilinen takılmalar ve çözümleri (bu makinede gerçekten yaşandı): (1) `yt-dlp`'nin varsayılan bağlantısı "Downloading webpage"de
+sonsuza dek bekleyebilir; kod `--impersonate chrome` kullanır (`createclip/ytdlp.py`), 3 dk zaman aşımı vardır.
+(2) Whisper modeli diskte olsa da Hugging Face'e güncelleme sorusu IPv6'da takılabilir; önbellekteki model çevrimdışı yüklenir.
 
 ## Sınırlar
 - Kick sohbet API'si resmi değil; değişirse kırılabilir. VOD'lar Kick'te süreli saklanır.

@@ -6,7 +6,8 @@ import shutil
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
-from . import audio_peaks, captions, clipper, kick, layout as layoutmod, peaks, transcribe
+from .log import log
+from . import audio_peaks, captions, clipper, kick, layout as layoutmod, peaks, sources, transcribe
 
 CANDIDATES = 30
 
@@ -229,7 +230,9 @@ def _parse_at(spec: str, default_len=45.0):
 
 def run(url: str, root: Path, opts: Options, progress=_noop) -> dict:
     progress("info", 0, "VOD bilgisi alınıyor (~1 dk sürebilir)")
-    vod = kick.vod_info(url)
+    vod = sources.vod_info(url)
+    log.info("VOD: %s | %s | %.0f dk | platform=%s | mod=%s kaynak=%s", vod.slug, vod.title[:50],
+             vod.duration / 60, sources.platform(url), opts.chat_mode, opts.source)
     jd = job_dir(root, vod)
     jd.mkdir(parents=True, exist_ok=True)
 
@@ -253,8 +256,8 @@ def run(url: str, root: Path, opts: Options, progress=_noop) -> dict:
         if opts.source in ("auto", "chat"):
             try:
                 progress("chat", 0, "Sohbet indiriliyor (yarıda kesilirse kaldığı yerden devam eder)")
-                data = kick.fetch_chat(vod, jd, mode=opts.chat_mode,
-                                       progress=lambda f, n, st="": progress("chat", f, f"{st} · {n} mesaj"))
+                data = sources.fetch_chat(vod, jd, mode=opts.chat_mode,
+                                          progress=lambda f, n, st="": progress("chat", f, f"{st} · {n} mesaj"))
                 msgs = data.msgs
                 kw = dict(lead=opts.lead, min_len=opts.min_len, max_len=opts.max_len)
                 if data.dense:
@@ -263,7 +266,9 @@ def run(url: str, root: Path, opts: Options, progress=_noop) -> dict:
                     found = peaks.find_peaks_sparse(msgs, data.coverage, data.baseline, vod.duration,
                                                     n=CANDIDATES, **kw)
                 source = "chat"
+                log.info("sohbet: %d mesaj, %d aday an", len(msgs), len(found))
             except kick.KickError as e:
+                log.warning("sohbet alınamadı: %s", e)
                 if opts.source == "chat":
                     raise
                 progress("chat", 1.0, f"Sohbet alınamadı ({e}); ses seviyesine geçiliyor")

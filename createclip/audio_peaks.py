@@ -5,15 +5,15 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from . import peaks
+from . import peaks, ytdlp
 
 
 def download_low(url: str, out: Path):
     out.parent.mkdir(parents=True, exist_ok=True)
     if out.exists():
         return out
-    p = subprocess.run([shutil.which("yt-dlp"), "-q", "-f", "worst[height>=160]/worst", "-o",
-                        str(out.with_suffix("")) + ".%(ext)s", url], capture_output=True, text=True)
+    p = subprocess.run(ytdlp.cmd("-q", "-f", "worst[height>=160]/worst", "-o",
+                        str(out.with_suffix("")) + ".%(ext)s", url), capture_output=True, text=True)
     if p.returncode != 0 or not out.exists():
         raise RuntimeError("Ses için düşük kalite VOD indirilemedi: " + p.stderr.strip()[-200:])
     return out

@@ -33,11 +33,12 @@ details{border-top:1px solid var(--line);padding:8px 0}summary{cursor:pointer;fo
 .sc{height:5px;background:var(--line);border-radius:3px;margin:4px 0 8px;overflow:hidden}.sc i{display:block;height:100%;background:var(--ok)}
 .hint{font-size:12px;color:var(--mut)}
 </style></head><body><main>
-<h1>createclip</h1><p class="s">Kick VOD linkini yapıştır; en iyi anları klip yapar, altyazı ekler, 9:16'ya çevirir. Her şey bu bilgisayarda çalışır.</p>
+<h1>createclip</h1><p class="s">Kick VOD veya biten bir YouTube yayınının linkini yapıştır; en iyi anları klip yapar, altyazı ekler, 9:16'ya çevirir. Her şey bu bilgisayarda çalışır.</p>
 
 <div class="card" id="newcard">
   <h2>1 · Yeni proje</h2>
-  <input id="url" type="text" placeholder="https://kick.com/kanal/videos/...">
+  <input id="url" type="text" placeholder="https://kick.com/kanal/videos/...  veya  https://www.youtube.com/watch?v=...">
+  <div class="meta" id="ytnote" style="display:none;margin:8px 0">YouTube: sohbet tekrarı (chat replay) tek seferde iner; hızlı/tam ayrımı yoktur. Videoda sohbet tekrarı yoksa ses seviyesi kullanılır. Hâlâ süren canlı yayınlar bitince işlenebilir.</div>
   <h3>Sohbet indirme (en iyi anları bulmak için)</h3>
   <div class="modes" id="modes">
     <div class="mode sel" data-v="smart"><b>Akıllı (önerilen)</b><span class="meta" id="smartdesc">Önce sohbetin seyrek bir örneğini alır, sonra yalnızca en hareketli bölgeleri ayrıntılı indirir. Ölçüm: 6 saatlik yayın ≈ 24 dk (tam indirme ≈ 57 dk); en iyi 5 an aynı, en iyi 10'un 9'u aynı çıktı. Yarıda kesilirse kaldığı yerden devam eder.</span></div>
@@ -81,6 +82,11 @@ details{border-top:1px solid var(--line);padding:8px 0}summary{cursor:pointer;fo
   <div class="row"><button id="go">Başlat</button><span id="msg" class="meta"></span></div>
   <div class="steps" id="steps"></div>
   <div class="bar"><i id="fill"></i></div>
+  <div class="err" id="stall" style="display:none;margin-top:8px"></div>
+  <details id="logbox" style="margin-top:10px"><summary class="meta" style="cursor:pointer">Günlük (log) göster</summary>
+    <pre id="logtxt" style="max-height:260px;overflow:auto;font-size:11px;line-height:1.45;background:#0d0f14;color:#c8ccd6;padding:10px;border-radius:8px;white-space:pre-wrap"></pre>
+    <button class="g" id="logall">Sunucu günlüğünü yükle</button> <span class="meta" id="logfile"></span>
+  </details>
 </div>
 
 <div class="card" id="projects" style="display:none"><h2>Önceki projeler</h2><div id="plist"></div></div>
@@ -162,15 +168,24 @@ $('go').onclick=async()=>{
   const {id}=await r.json();
   follow(id);
 };
+function showLog(j){
+  const st=$('stall');
+  if(j.status==='running'&&j.stalled){st.style.display='block';st.textContent='⚠ '+j.stalled+' sn\'dir ilerleme yok ('+(j.msg||j.stage)+'). Takılmış olabilir; günlüğe bak.'}
+  else st.style.display='none';
+  if(j.log){const el=$('logtxt'),bottom=el.scrollTop+el.clientHeight>=el.scrollHeight-8;el.textContent=j.log.join('\n');if(bottom)el.scrollTop=el.scrollHeight}
+  if(j.status==='error')$('logbox').open=true;
+}
+$('logall').onclick=async()=>{const r=await (await api('/api/log?n=400')).json();$('logtxt').textContent=r.text;$('logfile').textContent=r.file;$('logbox').open=true;$('logtxt').scrollTop=1e9};
 async function follow(id){
   $('go').disabled=true;$('msg').className='meta';
-  const j=await poll(id,j=>{showSteps(j.stage);$('fill').style.width=Math.round((j.frac||0)*100)+'%';$('msg').textContent=(j.msg||'')});
+  const j=await poll(id,j=>{showLog(j);showSteps(j.stage);$('fill').style.width=Math.round((j.frac||0)*100)+'%';$('msg').textContent=(j.msg||'')});
   $('go').disabled=false;
   if(j.status==='done'){$('msg').textContent='Bitti';$('steps').innerHTML='';open_(j.result.dir);listProjects()}
   else{$('msg').className='err';$('msg').textContent=j.error||'Bilinmeyen hata (sunucu günlüğüne bak)'}
 }
+$('url').addEventListener('input',()=>{$('ytnote').style.display=/youtube\.com|youtu\.be/.test($('url').value)?'block':'none'});
 async function reattach(){
-  try{const l=await (await api('/api/tasks')).json();const r=l.find(x=>x.status==='running'&&x.label&&x.label.includes('kick.com'));
+  try{const l=await (await api('/api/tasks')).json();const r=l.find(x=>x.status==='running'&&x.label&&/kick\.com|youtu/.test(x.label));
     if(r){$('msg').textContent='Çalışan işe bağlanıldı: '+r.label;follow(r.id)}}catch(e){}
 }
 async function listProjects(){

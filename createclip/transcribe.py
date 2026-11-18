@@ -47,10 +47,28 @@ def strip_prompt_echo(words, prompt: str):
     return [w for i, w in enumerate(words) if i not in drop]
 
 
+def model_path() -> str:
+    """Use the cached model directly. Asking the Hugging Face hub (even just to check for updates) can hang
+    forever on a half-working IPv6 route (seen: SYN_SENT for 9 min with the model already on disk), so a
+    cached model is loaded offline; only a missing model goes online, and then with short timeouts."""
+    import os
+    try:
+        from huggingface_hub import snapshot_download
+        return snapshot_download(MODEL, local_files_only=True)
+    except Exception:  # noqa: BLE001  (not cached yet -> download, but never wait forever)
+        os.environ.setdefault("HF_HUB_ETAG_TIMEOUT", "20")
+        os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "60")
+        return MODEL
+
+
 def transcribe_words(media: Path, prompt: str = "", language: str = "tr"):
+    import time
     import mlx_whisper
+    from .log import log
+    t0 = time.time()
+    log.info("konuşma çözülüyor: %s", Path(media).name)
     r = mlx_whisper.transcribe(
-        str(media), path_or_hf_repo=MODEL, language=language, word_timestamps=True,
+        str(media), path_or_hf_repo=model_path(), language=language, word_timestamps=True,
         initial_prompt=prompt or None, condition_on_previous_text=False,
         no_speech_threshold=None, compression_ratio_threshold=2.4)
     words = []
@@ -61,6 +79,7 @@ def transcribe_words(media: Path, prompt: str = "", language: str = "tr"):
                 s = float(w["start"])
                 e = min(float(w["end"]), s + 1.5)            # DTW sometimes stretches a word over silence
                 words.append({"word": txt, "start": round(s, 3), "end": round(e, 3)})
+    log.info("konuşma çözüldü: %d kelime, %.1fs", len(words), time.time() - t0)
     return words
 
 
