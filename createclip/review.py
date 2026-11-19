@@ -6,7 +6,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from . import pipeline, transcribe
+from . import dupes, pipeline, titles, transcribe
 from .log import log, run
 
 STATUSES = ("new", "approved", "rejected")
@@ -22,7 +22,15 @@ def _clip_text(jd: Path, rec: dict) -> str:
 
 
 def _video(rec: dict):
-    return rec.get("captioned") or rec.get("plain") or rec.get("src")
+    return rec.get("voiced") or rec.get("captioned") or rec.get("plain") or rec.get("src")
+
+
+def clip_text_of(root: Path, row: dict) -> str:
+    jd = Path(root) / "output" / row["project"]
+    try:
+        return _clip_text(jd, pipeline.get_clip(pipeline.load(jd), row["i"]))
+    except (KeyError, OSError, ValueError):
+        return ""
 
 
 def _stamp(sec: float) -> str:
@@ -80,11 +88,27 @@ def inbox(root: Path, status: str = "new") -> list:
                          "video": f"/files/{jd.name}/{v}", "start": rec["start"], "end": rec["end"],
                          "length": round(rec["end"] - rec["start"], 1), "title": rec["title"],
                          "description": rec["description"], "tags": rec.get("tags", []),
-                         "source_title": m.get("title", ""), "slug": m.get("slug", ""), "exported": rec.get("exported")})
+                         "source_title": m.get("title", ""), "slug": m.get("slug", ""), "exported": rec.get("exported"),
+                         "reactions": bool(rec.get("reactions")), "banner": rec.get("banner") or "",
+                         "voice": bool(rec.get("voice")), "dup_of": None})
         if dirty:
             pipeline.save(jd, m)
     rows.sort(key=lambda r: (-r["score"], r["project"]))
+    if status in ("new", "all") and rows:
+        for r in rows:
+            r["text"] = clip_text_of(root, r)
+        dupes.mark(rows)
+        for r in rows:
+            r.pop("text", None)
     return rows
+
+
+def ai_titles(jd: Path, i: int) -> dict:
+    """Claude title candidates for one clip (explicit user action; the transcript is sent to Anthropic)."""
+    jd = Path(jd)
+    m = pipeline.load(jd)
+    rec = pipeline.get_clip(m, i)
+    return titles.generate(m, rec, _clip_text(jd, rec))
 
 
 def review(jd: Path, i: int, **ch) -> dict:

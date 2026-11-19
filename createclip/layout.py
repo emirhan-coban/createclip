@@ -8,6 +8,8 @@ Cell coordinates are normalised (0-1) centres; zoom >= 1."""
 import subprocess
 from pathlib import Path
 
+from .log import run_ok
+
 OUT_W, OUT_H = 1080, 1920
 DEFAULT = {"mode": "none", "cells": []}
 
@@ -56,7 +58,60 @@ def filter_graph(layout: dict, W: int, H: int) -> str:
 
 def render(src: Path, layout: dict, out: Path, W: int, H: int) -> Path:
     out.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", str(src), "-filter_complex",
-                    filter_graph(layout, W, H), "-map", "[v]", "-map", "0:a?", "-c:v", "libx264", "-crf", "20",
-                    "-pix_fmt", "yuv420p", "-c:a", "aac", str(out)], check=True)
+    run_ok(["ffmpeg", "-y", "-v", "error", "-i", str(src), "-filter_complex",
+            filter_graph(layout, W, H), "-map", "[v]", "-map", "0:a?", "-c:v", "libx264", "-crf", "20",
+            "-pix_fmt", "yuv420p", "-c:a", "aac", str(out)], "9:16 yerleşim")
     return out
+
+
+# ---------------------------------------------------------------- face finding (optional: needs opencv)
+def detect_face(video: Path, samples: int = 16):
+    """Streamer face box found by OpenCV's Haar cascade in evenly spaced frames: (cx, cy, face_h) normalised to the
+    frame, median over the frames where a face was found. None when opencv is missing, no face turns up in at least
+    3 frames, or the detections jump around (different things detected)."""
+    try:
+        import cv2
+        import statistics
+    except ImportError:
+        return None
+    cap = cv2.VideoCapture(str(video))
+    n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    if n < 2:
+        return None
+    cascades = [cv2.CascadeClassifier(str(Path(cv2.data.haarcascades) / n))
+                for n in ("haarcascade_frontalface_alt2.xml", "haarcascade_frontalface_default.xml")]
+    hits = []
+    for k in range(samples):
+        cap.set(cv2.CAP_PROP_POS_FRAMES, int(n * (k + 0.5) / samples))
+        ok, fr = cap.read()
+        if not ok:
+            continue
+        H, W = fr.shape[:2]
+        g = cv2.equalizeHist(cv2.cvtColor(fr, cv2.COLOR_BGR2GRAY))
+        faces = []
+        for cas in cascades:
+            faces = cas.detectMultiScale(g, scaleFactor=1.1, minNeighbors=5, minSize=(int(H * 0.06), int(H * 0.06)))
+            if len(faces):
+                break
+        if len(faces):
+            x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
+            hits.append((float((x + w / 2) / W), float((y + h / 2) / H), float(h / H)))
+    cap.release()
+    if len(hits) < 3:
+        return None
+    cx, cy, fh = (statistics.median(v[i] for v in hits) for i in range(3))
+    hits = [v for v in hits if abs(v[0] - cx) <= 0.08 and abs(v[1] - cy) <= 0.08]    # ignore stray detections
+    if len(hits) < 3:
+        return None
+    cx, cy, fh = (statistics.median(v[i] for v in hits) for i in range(3))
+    return cx, cy, fh
+
+
+def auto_layout(video: Path):
+    """stack layout: game on top, the face (zoomed) below. None when no stable face is found."""
+    f = detect_face(video)
+    if not f:
+        return None
+    cx, cy, fh = f
+    zoom = min(4.0, max(1.5, 1 / (3.2 * fh)))
+    return {"mode": "stack", "cells": [{"x": 0.5, "y": 0.5, "zoom": 1.0}, {"x": round(cx, 3), "y": round(cy, 3), "zoom": round(zoom, 2)}]}

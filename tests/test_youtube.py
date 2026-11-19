@@ -39,7 +39,7 @@ def test_parse_chat_and_peaks(tmp_path):
 
 def test_fetch_chat_uses_cache(tmp_path, monkeypatch):
     (tmp_path / youtube.CHAT_FILE).write_text(_line(10_000, "m1", [{"text": "selam"}]))
-    monkeypatch.setattr(youtube.subprocess, "run", lambda *a, **k: pytest.fail("cache must be used"))
+    monkeypatch.setattr(youtube, "run", lambda *a, **k: pytest.fail("cache must be used"))
     vod = kick.Vod("dQw4w9WgXcQ", "kanal", "t", 100.0, 0, 0, "https://youtu.be/dQw4w9WgXcQ")
     d = sources.fetch_chat(vod, tmp_path)
     assert d.dense and len(d.msgs) == 1 and d.coverage.covers(0, 100)
@@ -48,7 +48,7 @@ def test_fetch_chat_uses_cache(tmp_path, monkeypatch):
 def test_live_stream_rejected(monkeypatch):
     class P:
         returncode, stdout, stderr = 0, json.dumps({"live_status": "is_live", "duration": None}), ""
-    monkeypatch.setattr(youtube.subprocess, "run", lambda *a, **k: P())
+    monkeypatch.setattr(youtube, "run", lambda *a, **k: P())
     monkeypatch.setattr(youtube, "_cmd", lambda *a: ["yt-dlp", *a])
     with pytest.raises(youtube.YouTubeError, match="sürüyor"):
         youtube.vod_info("https://youtu.be/dQw4w9WgXcQ")

@@ -7,12 +7,12 @@ import threading
 import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .. import layout as layoutmod, log as logmod, pipeline, review as reviewmod, transcribe, watch as watchmod
+from .. import cleanup as cleanupmod, compile as compilemod, layout as layoutmod, log as logmod, notify, pipeline, review as reviewmod, titles as titlesmod, transcribe, watch as watchmod
 
 HTML = Path(__file__).with_name("index.html")
 
@@ -37,6 +37,18 @@ class JobReq(BaseModel):
     max_len: float = 60
     lead: float = 20
     max_height: int = 720
+    reactions: bool = False
+
+
+class CompileReq(BaseModel):
+    n: int = 5
+    status: str = "approved"
+    title: str | None = None
+
+
+class CleanupReq(BaseModel):
+    days: float = 14
+    apply: bool = False
 
 
 class ReviewReq(BaseModel):
@@ -73,6 +85,8 @@ class ClipChanges(BaseModel):
     style: dict | None = None
     layout: dict | None = None
     captions: bool | None = None
+    reactions: bool | None = None
+    banner: str | None = None
 
 
 class AddReq(BaseModel):
@@ -96,6 +110,8 @@ def make_app(root: Path) -> FastAPI:
                           "log": [], "stalled": 0, "last": time.time()}
 
         def prog(stage, frac, msg=""):
+            if t.get("cancelled"):
+                raise logmod.Cancelled("İptal edildi")
             if stage != t["stage"] or abs(frac - t["frac"]) >= 0.2:
                 logmod.log.info("[%s] %d%% %s", stage, int(frac * 100), msg)
             t.update(stage=stage, frac=round(frac, 3), msg=msg, last=time.time(), stalled=0)
@@ -114,15 +130,25 @@ def make_app(root: Path) -> FastAPI:
             logmod.log.addHandler(h)
             try:
                 with busy:
+                    logmod.clear_cancel()
+                    if t.get("cancelled"):
+                        raise logmod.Cancelled("İptal edildi")
                     t["last"] = time.time()
                     logmod.log.info("İş başladı: %s", label)
                     res = fn(*a, progress=prog, **kw)
                 t.update(status="done", result=res)
                 logmod.log.info("İş bitti: %s", label)
+                if label:
+                    notify.notify("createclip: bitti", label[:80])
+            except logmod.Cancelled:
+                logmod.log.warning("İş iptal edildi: %s", label)
+                t.update(status="cancelled", error="İptal edildi")
             except Exception as e:  # noqa: BLE001
                 logmod.log.error("İş başarısız: %s\n%s", e, traceback.format_exc())
                 extra = {"code": "confirm_audio", "est_mb": e.est_mb} if isinstance(e, pipeline.NeedsAudioConfirm) else {}
                 t.update(status="error", error=str(e), **extra)
+                if label:
+                    notify.notify("createclip: hata", str(e)[:100])
             finally:
                 logmod.log.removeHandler(h)
 
@@ -157,6 +183,17 @@ def make_app(root: Path) -> FastAPI:
             raise HTTPException(404)
         return tasks[tid]
 
+    @app.post("/api/tasks/{tid}/cancel")
+    def task_cancel(tid: str):
+        t = tasks.get(tid)
+        if not t:
+            raise HTTPException(404)
+        if t["status"] == "running":
+            t["cancelled"] = True
+            if t["stage"] != "queued":
+                logmod.request_cancel()           # kills the ffmpeg/yt-dlp process that is running now
+        return {"ok": True}
+
     @app.post("/api/jobs")
     def create(req: JobReq):
         o = pipeline.Options(
@@ -165,7 +202,8 @@ def make_app(root: Path) -> FastAPI:
             min_len=req.min_len, max_len=req.max_len, lead=req.lead, max_height=req.max_height,
             layout={"mode": req.layout, "cells": layoutmod.default_cells(req.layout)},
             source=req.source, at=req.at, snap=req.snap, vocab=req.vocab,
-            chat_mode="full" if (req.full_chat or req.chat_mode == "full") else "smart", audio_ok=req.audio_ok)
+            chat_mode="full" if (req.full_chat or req.chat_mode == "full") else "smart", audio_ok=req.audio_ok,
+            reactions=req.reactions)
 
         def job(progress):
             m = pipeline.run(req.url, root, o, progress)
@@ -179,7 +217,7 @@ def make_app(root: Path) -> FastAPI:
             try:
                 m = pipeline.load(d.parent)
                 out.append({"name": d.parent.name, "title": m["title"], "slug": m["slug"],
-                            "clips": len(m["clips"])})
+                            "clips": len(m["clips"]), "keep": bool(m.get("keep"))})
             except Exception:  # noqa: BLE001
                 continue
         return out
@@ -209,13 +247,69 @@ def make_app(root: Path) -> FastAPI:
     @app.delete("/api/projects/{name}")
     def delete_project(name: str):
         d = _dir(name)
+        if pipeline.load(d).get("keep"):
+            raise HTTPException(400, "Bu proje korumalı; önce korumayı kaldır.")
         shutil.rmtree(d)
         return {"ok": True}
+
+    @app.post("/api/projects/{name}/keep")
+    def project_keep(name: str, keep: bool = True):
+        _dir(name)
+        cleanupmod.set_keep(root, name, keep)
+        return {"ok": True, "keep": keep}
+
+    @app.put("/api/projects/{name}/clips/{i}/voice")
+    async def voice_put(name: str, i: int, request: Request):
+        d = _dir(name)
+        data = await request.body()
+        if not 1000 < len(data) < 60_000_000:
+            raise HTTPException(400, "Ses kaydı boş ya da çok büyük.")
+
+        def job(progress):
+            return pipeline.set_voice(d, i, data, progress)
+        return {"id": spawn(job)}
+
+    @app.delete("/api/projects/{name}/clips/{i}/voice")
+    def voice_del(name: str, i: int):
+        d = _dir(name)
+        return {"id": spawn(lambda progress: pipeline.set_voice(d, i, None, progress))}
+
+    @app.post("/api/projects/{name}/clips/{i}/titles")
+    def clip_titles(name: str, i: int):
+        d = _dir(name)
+        try:
+            return reviewmod.ai_titles(d, i)
+        except KeyError:
+            raise HTTPException(404, "klip yok")
+        except titlesmod.TitleError as e:
+            raise HTTPException(400, str(e))
+
+    @app.get("/api/titles-available")
+    def titles_available():
+        return {"available": titlesmod.available()}
+
+    @app.post("/api/compile")
+    def compile_(req: CompileReq):
+        def job(progress):
+            progress("compile", 0.1, "Derleme hazırlanıyor")
+            return compilemod.build(root, req.n, req.status, req.title)
+        return {"id": spawn(job, label="derleme")}
+
+    @app.get("/api/storage")
+    def storage():
+        return cleanupmod.usage(root)
+
+    @app.post("/api/cleanup")
+    def cleanup(req: CleanupReq):
+        items = cleanupmod.plan(root, req.days)
+        total = sum(n for _, n in items)
+        freed = cleanupmod.apply(items) if req.apply else 0
+        return {"files": len(items), "bytes": total, "freed": freed, "applied": req.apply}
 
     # ---- review inbox, ready packages
     @app.get("/inbox", response_class=HTMLResponse)
     def inbox_page():
-        return HTML.with_name("inbox.html").read_text()
+        return RedirectResponse("/#inbox")
 
     @app.get("/api/inbox")
     def inbox(status: str = "new"):

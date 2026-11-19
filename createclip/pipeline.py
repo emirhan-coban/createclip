@@ -7,7 +7,7 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
 from .log import log
-from . import audio_peaks, captions, clipper, kick, layout as layoutmod, peaks, sources, transcribe
+from . import audio_peaks, captions, clipper, kick, layout as layoutmod, overlay, peaks, sources, transcribe
 
 CANDIDATES = 30
 
@@ -48,6 +48,7 @@ class Options:
     at: list = field(default_factory=list)   # manual clips: "1:44:50" or "1:44:50-1:45:40"
     audio_ok: bool = False       # allow the whole-video audio fallback when chat is unavailable (source=auto)
     chat_mode: str = "smart"     # smart (sparse sampling + dense around candidates) | full (every window)
+    reactions: bool = False      # burn the viewers' chat messages of that moment into every clip
     vocab: str = ""              # optional names for the speech model, e.g. "Berk, Derbeder" (use sparingly)
 
 
@@ -75,7 +76,8 @@ def _rel(jd, p):
 
 
 # ---------------------------------------------------------------- building one clip
-def _produce(jd: Path, m: dict, rec: dict, need_words: bool, need_base: bool, need_caps: bool, progress):
+def _produce(jd: Path, m: dict, rec: dict, need_words: bool, need_base: bool, need_caps: bool, progress,
+             need_ov: bool = False):
     jd = Path(jd)
     src = jd / rec["src"]
     name = rec["name"]
@@ -90,23 +92,46 @@ def _produce(jd: Path, m: dict, rec: dict, need_words: bool, need_base: bool, ne
         need_caps = True
     lay = rec["layout"]
     if need_base or not rec.get("base"):
+        W, H = captions.probe_size(src)
+        if lay["mode"] == "face":                      # find the streamer's face; fall back to the blurred layout
+            progress("layout", 0.4, f"Klip {rec['i']}: yüz aranıyor")
+            lay = rec["layout"] = layoutmod.auto_layout(src) or {"mode": "blur", "cells": []}
+            log.info("klip %s yüz yerleşimi: %s", rec["i"], lay["mode"])
         if lay["mode"] == "none":
             base = src
         else:
             progress("layout", 0.5, f"Klip {rec['i']}: 9:16 yerleşim")
-            W, H = captions.probe_size(src)
             base = layoutmod.render(src, lay, jd / "clips" / f"{name}_dikey.mp4", W, H)
         rec["base"] = _rel(jd, base)
-        need_caps = True
-    rec["plain"] = rec["base"] if m["defaults"]["keep_plain"] else None
+        need_caps = need_ov = True
+    stage = rec["base"]
+    if rec.get("reactions") or rec.get("banner"):
+        if need_ov or not rec.get("overlaid"):
+            progress("overlay", 0.65, f"Klip {rec['i']}: sohbet tepkisi / başlık kartı")
+            try:
+                ov = overlay.apply(jd, m, rec, jd / rec["base"], jd / "clips" / f"{name}_tepki.mp4")
+                rec["overlaid"] = _rel(jd, ov)
+            except ValueError as e:
+                log.warning("klip %s bindirme yok: %s", rec["i"], e)
+                rec["overlaid"] = None
+            need_caps = True
+        stage = rec.get("overlaid") or rec["base"]
+    else:
+        rec["overlaid"] = None
+    rec["plain"] = stage if m["defaults"]["keep_plain"] else None
     if rec["captions"] and rec.get("words"):
         if need_caps or not rec.get("captioned"):
             progress("captions", 0.8, f"Klip {rec['i']}: altyazı basılıyor")
-            out = captions.render(jd / rec["base"], transcribe.load_words(jd / rec["words"]),
+            out = captions.render(jd / stage, transcribe.load_words(jd / rec["words"]),
                                   jd / "captioned" / f"{name}_altyazili.mp4", rec["style"])
             rec["captioned"] = _rel(jd, out)
     else:
         rec["captioned"] = None
+    rec["voiced"] = None
+    if rec.get("voice") and (jd / rec["voice"]).exists():           # re-mix the recorded commentary over the result
+        progress("voice", 0.95, f"Klip {rec['i']}: yorum sesi karıştırılıyor")
+        final = jd / (rec["captioned"] or rec["plain"] or rec["base"])
+        rec["voiced"] = _rel(jd, overlay.mix_voice(final, jd / rec["voice"], jd / "clips" / f"{name}_yorum.mp4"))
 
 
 def _add_clip(jd: Path, m: dict, start: float, end: float, score: float, opts_like: dict, progress):
@@ -122,7 +147,8 @@ def _add_clip(jd: Path, m: dict, start: float, end: float, score: float, opts_li
     rec = {"i": i, "name": name, "score": score, "start": round(s, 2), "end": round(e, 2),
            "raw_start": rs, "raw_end": re_, "raw": _rel(jd, raw), "src": _rel(jd, out),
            "captions": d["captions"], "style": dict(opts_like["style"]), "layout": json.loads(json.dumps(opts_like["layout"])),
-           "words": None, "srt": None, "base": None, "plain": None, "captioned": None}
+           "words": None, "srt": None, "base": None, "plain": None, "captioned": None,
+           "reactions": bool(opts_like.get("reactions")), "banner": None, "overlaid": None, "voice": None, "voiced": None}
     m["clips"].append(rec)
     _produce(jd, m, rec, True, True, True, progress)
     save(jd, m)
@@ -146,7 +172,7 @@ def update_clip(jd: Path, i: int, changes: dict, progress=_noop) -> dict:
         if abs(s - rec["start"]) > 0.01 or abs(e - rec["end"]) > 0.01:
             progress("clips", 0.0, "Klip yeniden kesiliyor")
             src = jd / rec["src"]
-            if s >= rec["raw_start"] and e <= rec["raw_end"]:
+            if s >= rec["raw_start"] and e <= rec["raw_end"] and (jd / rec["raw"]).exists():
                 clipper.trim(jd / rec["raw"], s - rec["raw_start"], e - rec["raw_start"], src)
             else:
                 raw = jd / rec["raw"]
@@ -159,7 +185,7 @@ def update_clip(jd: Path, i: int, changes: dict, progress=_noop) -> dict:
     if "layout" in changes:
         lay = changes["layout"]
         mode = lay.get("mode", "none")
-        if mode not in ("none", "blur", "crop", "stack"):
+        if mode not in ("none", "blur", "crop", "stack", "face"):
             raise ValueError("Bilinmeyen yerleşim")
         cells = lay.get("cells") or layoutmod.default_cells(mode)
         if rec["layout"] != {"mode": mode, "cells": cells}:
@@ -174,6 +200,11 @@ def update_clip(jd: Path, i: int, changes: dict, progress=_noop) -> dict:
             rec["style"] = new
             need_caps = True
 
+    need_ov = False
+    for key in ("reactions", "banner"):
+        if key in changes and changes[key] != rec.get(key):
+            rec[key] = changes[key] if key == "banner" else bool(changes[key])
+            need_ov = True
     if "captions" in changes and bool(changes["captions"]) != rec["captions"]:
         rec["captions"] = bool(changes["captions"])
         need_caps = True
@@ -185,9 +216,29 @@ def update_clip(jd: Path, i: int, changes: dict, progress=_noop) -> dict:
         transcribe.to_srt(words, jd / rec["srt"])
         need_caps = True
 
-    _produce(jd, m, rec, need_words, need_base, need_caps, progress)
+    _produce(jd, m, rec, need_words, need_base, need_caps, progress, need_ov)
     save(jd, m)
     progress("done", 1.0, "Bitti")
+    return rec
+
+
+def set_voice(jd: Path, i: int, data: bytes | None, progress=_noop) -> dict:
+    """Attach (or with None remove) the recorded commentary of a clip and re-mix."""
+    jd = Path(jd)
+    m = load(jd)
+    rec = get_clip(m, i)
+    old = jd / rec["voice"] if rec.get("voice") else None
+    if data:
+        p = jd / "voice" / f"{rec['name']}.webm"
+        p.parent.mkdir(exist_ok=True)
+        p.write_bytes(data)
+        rec["voice"] = _rel(jd, p)
+    else:
+        rec["voice"] = None
+        if old and old.exists():
+            old.unlink()
+    _produce(jd, m, rec, False, False, False, progress)
+    save(jd, m)
     return rec
 
 
@@ -195,7 +246,7 @@ def delete_clip(jd: Path, i: int):
     jd = Path(jd)
     m = load(jd)
     rec = get_clip(m, i)
-    for k in ("raw", "src", "base", "plain", "captioned", "words", "srt"):
+    for k in ("raw", "src", "base", "plain", "captioned", "words", "srt", "overlaid", "voice", "voiced"):
         p = rec.get(k)
         if p and (jd / p).exists():
             (jd / p).unlink()
@@ -233,7 +284,7 @@ def add_next(jd: Path, progress=_noop) -> dict:
 
 def _style_layout(m):
     d = m["defaults"]
-    return {"style": d["style"], "layout": d["layout"]}
+    return {"style": d["style"], "layout": d["layout"], "reactions": d.get("reactions", False)}
 
 
 # ---------------------------------------------------------------- whole job
@@ -320,4 +371,4 @@ def run(url: str, root: Path, opts: Options, progress=_noop) -> dict:
 
 def _defaults(o: Options) -> dict:
     return {"captions": o.captions, "keep_plain": o.keep_plain, "style": o.style, "layout": o.layout,
-            "max_height": o.max_height, "snap": o.snap, "min_len": o.min_len, "max_len": o.max_len}
+            "max_height": o.max_height, "snap": o.snap, "reactions": o.reactions, "min_len": o.min_len, "max_len": o.max_len}

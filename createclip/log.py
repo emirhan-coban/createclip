@@ -58,18 +58,71 @@ def tail(path: Path, n: int = 200) -> str:
         return ""
 
 
+class Cancelled(RuntimeError):
+    """The user pressed "İptal"; raised between steps and after a killed subprocess."""
+
+
+_procs: set = set()
+_proc_lock = threading.Lock()
+_cancel = threading.Event()
+
+
+def cancel_requested() -> bool:
+    return _cancel.is_set()
+
+
+def request_cancel():
+    """Ask the running job to stop: later steps raise Cancelled, running subprocesses are killed."""
+    _cancel.set()
+    with _proc_lock:
+        for p in list(_procs):
+            try:
+                p.kill()
+            except OSError:
+                pass
+
+
+def clear_cancel():
+    _cancel.clear()
+
+
+def check_cancel():
+    if _cancel.is_set():
+        raise Cancelled("İptal edildi")
+
+
 def run(cmd: list, what: str, timeout: float | None = None, **kw) -> subprocess.CompletedProcess:
-    """subprocess.run(capture_output, text) + logging. Timeouts are logged and re-raised."""
+    """subprocess.run(capture_output, text) + logging. Timeouts are logged and re-raised; the process can be
+    killed by request_cancel()."""
+    check_cancel()
     t0 = time.time()
     log.debug("%s: %s", what, " ".join(str(c) for c in cmd)[:300])
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, **kw)
+    with _proc_lock:
+        _procs.add(proc)
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, **kw)
+        out, err = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.communicate()
         log.error("%s: zaman aşımı (%ss)", what, timeout)
         raise
+    finally:
+        with _proc_lock:
+            _procs.discard(proc)
+    p = subprocess.CompletedProcess(cmd, proc.returncode, out, err)
+    check_cancel()
     dt = time.time() - t0
     if p.returncode:
         log.warning("%s: çıkış kodu %s (%.1fs) %s", what, p.returncode, dt, (p.stderr or "").strip()[-300:])
     else:
         log.info("%s: tamam (%.1fs)", what, dt)
+    return p
+
+
+def run_ok(cmd: list, what: str, timeout: float | None = None) -> subprocess.CompletedProcess:
+    """run() that raises RuntimeError (with the ffmpeg error tail) when the command fails."""
+    p = run(cmd, what, timeout=timeout)
+    if p.returncode:
+        raise RuntimeError(f"{what} başarısız: {(p.stderr or '').strip()[-300:]}")
     return p

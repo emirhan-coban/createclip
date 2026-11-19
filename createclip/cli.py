@@ -2,7 +2,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from . import doctor as doctormod, layout as layoutmod, log as logmod, pipeline, watch as watchmod
+from . import cleanup as cleanupmod, compile as compilemod, doctor as doctormod, layout as layoutmod, log as logmod, pipeline, watch as watchmod
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -25,8 +25,10 @@ def main(argv=None):
                    help="altyazısız sürümü de tut")
     r.add_argument("--font", choices=["montserrat", "poppins", "gabarito"], default="montserrat")
     r.add_argument("--mask-profanity", action="store_true", help="küfürleri yıldızla")
-    r.add_argument("--layout", choices=["none", "blur", "crop", "stack"], default="none",
-                   help="9:16 yerleşim: none=yatay, blur=bulanık arka plan, crop=tek pencere, stack=iki pencere")
+    r.add_argument("--layout", choices=["none", "blur", "crop", "stack", "face"], default="none",
+                   help="9:16 yerleşim: none=yatay, blur=bulanık arka plan, crop=tek pencere, stack=iki pencere, "
+                   "face=yüzü bul (üstte oyun, altta yüz; bulunamazsa blur)")
+    r.add_argument("--reactions", action="store_true", help="o andaki izleyici sohbet mesajlarını videoya göm")
     r.add_argument("--source", choices=["auto", "chat", "audio"], default="auto",
                    help="an bulma kaynağı (auto: sohbet, olmazsa ses)")
     r.add_argument("--at", action="append", default=[], metavar="ZAMAN",
@@ -63,7 +65,7 @@ def main(argv=None):
     ch.add_argument("--min-minutes", type=float, default=30, help="bundan kısa yayınlar atlanır")
     ch.add_argument("--backfill", type=int, default=1, help="ilk eklemede kaç eski yayın kuyruğa girsin")
     ch.add_argument("-n", type=int, default=5, help="yayın başına klip sayısı")
-    ch.add_argument("--layout", choices=["none", "blur", "crop", "stack"], default="none")
+    ch.add_argument("--layout", choices=["none", "blur", "crop", "stack", "face"], default="none")
     ch.add_argument("--max-height", type=int, default=720, choices=[480, 720, 1080])
     ch.add_argument("--out", type=Path, default=ROOT)
 
@@ -78,6 +80,21 @@ def main(argv=None):
     qu.add_argument("id", nargs="?")
     qu.add_argument("--out", type=Path, default=ROOT)
 
+    cl = sub.add_parser("cleanup", help="eski, yeniden üretilebilir dosyaları (ham kesit, kare, ses) temizle")
+    cl.add_argument("--days", type=float, default=14, help="bundan yeni projelere dokunma")
+    cl.add_argument("--yes", action="store_true", help="gerçekten sil (yoksa yalnız ne silineceğini göster)")
+    cl.add_argument("--out", type=Path, default=ROOT)
+
+    kp = sub.add_parser("keep", help="projeyi korumaya al (temizlik ve silme dokunmaz)")
+    kp.add_argument("name")
+    kp.add_argument("--off", action="store_true")
+    kp.add_argument("--out", type=Path, default=ROOT)
+
+    cp = sub.add_parser("compile", help='"Günün en iyi N anı" derlemesi (onaylanan kliplerden)')
+    cp.add_argument("-n", type=int, default=5)
+    cp.add_argument("--status", choices=["approved", "new", "all"], default="approved")
+    cp.add_argument("--out", type=Path, default=ROOT)
+
     s = sub.add_parser("serve", help="yerel web arayüzünü başlat")
     s.add_argument("-v", "--verbose", action="store_true", help="ayrıntılı günlüğü ekrana da yaz")
     s.add_argument("--port", type=int, default=8765)
@@ -90,6 +107,29 @@ def main(argv=None):
     logfile = logmod.setup(a.out, getattr(a, "verbose", False))
     if a.cmd == "doctor":
         return doctormod.report(a.out, not a.no_net)
+    if a.cmd == "cleanup":
+        items = cleanupmod.plan(a.out, a.days)
+        for pth, n in items:
+            print(f"{n / 1e6:8.1f} MB  {pth}")
+        total = sum(n for _, n in items)
+        print(f"Toplam {total / 1e6:.1f} MB ({len(items)} öğe); korumalı ve {a.days:g} günden yeni projeler hariç.")
+        if items and a.yes:
+            print(f"Silindi: {cleanupmod.apply(items) / 1e6:.1f} MB")
+        elif items:
+            print("Silmek için --yes ekle.")
+        return 0
+    if a.cmd == "keep":
+        cleanupmod.set_keep(a.out, a.name, not a.off)
+        print("Korumaya alındı" if not a.off else "Koruma kaldırıldı")
+        return 0
+    if a.cmd == "compile":
+        try:
+            r = compilemod.build(a.out, a.n, a.status)
+        except Exception as e:  # noqa: BLE001
+            print(f"Hata: {e}", file=sys.stderr)
+            return 1
+        print(f"Derleme: {r['path']}\nKaynak listesi: {r['credits']}")
+        return 0
     if a.cmd == "channels":
         if a.action == "list":
             for c in watchmod.load_channels(a.out):
@@ -139,7 +179,7 @@ def main(argv=None):
                                     "chunk": a.chunk, "sync": a.sync},
                              min_len=a.min_len, max_len=a.max_len, max_height=a.max_height,
                              layout={"mode": a.layout, "cells": layoutmod.default_cells(a.layout)},
-                             snap=not a.no_snap, source=a.source, at=a.at, vocab=a.vocab, chat_mode="full" if a.full_chat else "smart")
+                             snap=not a.no_snap, source=a.source, at=a.at, vocab=a.vocab, reactions=a.reactions, chat_mode="full" if a.full_chat else "smart")
         try:
             try:
                 m = pipeline.run(a.url, a.out, o, _progress)

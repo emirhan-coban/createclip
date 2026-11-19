@@ -15,6 +15,7 @@ from dataclasses import fields
 from pathlib import Path
 
 from . import pipeline, sources, ytdlp
+from . import notify
 from .log import log, run
 
 STATUSES = ("pending", "running", "done", "error", "confirm_audio", "skipped")
@@ -249,8 +250,12 @@ def loop(root: Path, every_hours: float = 6.0, once: bool = False, progress=None
     recover_running(root)
     while True:
         scan(root)
-        while process_one(root, progress):
-            pass
+        done = failed = 0
+        while (it := process_one(root, progress)):
+            done += it["status"] == "done"
+            failed += it["status"] == "error"
+        if done or failed:
+            notify.notify("createclip", f"{done} yayın işlendi" + (f", {failed} hata" if failed else "") + " — onay kutusu hazır")
         if once:
             return
         log.info("sonraki tarama %.1f saat sonra", every_hours)

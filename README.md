@@ -98,7 +98,7 @@ zamanları 5 klipte ses başlangıçlarıyla karşılaştırıldı: medyan sapma
 
 ## Geliştirme
 ```bash
-./.venv/bin/python -m pytest -q       # 44 test
+./.venv/bin/python -m pytest -q       # 58 test
 ```
 Dosyalar: `kick.py` (VOD + sohbet), `peaks.py`, `audio_peaks.py`, `clipper.py`, `transcribe.py`, `captions.py`, `layout.py`,
 `youtube.py`, `sources.py` (YouTube + platform seçimi), `watch.py` (izleyici + kuyruk), `review.py` (onay kutusu + hazır paket), `ytdlp.py`, `log.py`, `pipeline.py` (iş akışı + düzenleme), `web/` (FastAPI + tek sayfa arayüz), `syncfix.py` (senkron ölçüm aracı).
@@ -128,6 +128,37 @@ Dosyalar: `kick.py` (VOD + sohbet), `peaks.py`, `audio_peaks.py`, `clipper.py`, 
 > erişimini düşüreceğini duyurdu (ve "yalnızca sesli anlatım, küçük kurgu, şablonlu toplu düzenleme" özgün sayılmıyor). Yeniden kullanım
 > politikası izin alınsa bile geçerli ve kanal düzeyinde değerlendiriliyor. Bu araç kesim/altyazı/yerleşim otomasyonudur; kanalın
 > özgün katkısını (yorum, bağlam, derleme) senin eklemen gerekir. Ayrıntı ve güncel kurallar için YouTube Yardım'ı oku; bu hukuki tavsiye değildir.
+
+## Özgün katkı araçları, ses ve temizlik
+
+YouTube'un Ekim 2026 Shorts güncellemesi, başkasının klibini katkısız yeniden yükleyen kanalların erişimini düşürüyor
+(kaynak: üçüncü taraf özetleri; resmi sayfayı yayından önce kontrol et). Bu yüzden klibe kendi katkını eklemek için araçlar var.
+Hiçbiri "politikaya uyar" garantisi değildir.
+
+- **Sohbet tepkisi** (`--reactions` ya da editörde Ekler): o anda yayına yazılan gerçek mesajlar videoda görünür
+  (komutlar, çok uzun mesajlar, tekrarlar ve çok sık mesajlar elenir).
+- **Başlık kartı**: ilk 3 saniyede klibin ne hakkında olduğunu söyleyen kart.
+- **Yorum sesi**: editörde klip oynarken mikrofona konuş (kulaklık tak); kayıt klibe karıştırılır, sen konuşurken orijinal ses kısılır.
+- **Derleme**: Onay kutusunda "Günün en iyi anları derlemesi" ya da `createclip compile -n 5`. Açılış kartı, geri sayım kartları,
+  klipler; kaynak yayın ve zaman damgası listesi yanında `.txt` olarak çıkar (`ready/derleme/`).
+- **Yüz takibi** (`--layout face`): OpenCV (Haar) ile yayıncının yüz kamerasını bulur; üstte oyun, altta yakın yüz.
+  Bulunamazsa bulanık arka plana döner. Ölçüm: tek bir yayıncının 12 klibinin 12'sinde bulundu (0,87-0,89 / 0,74-0,77 konumunda),
+  klip başına ~1,5 sn. Başka yayıncılarda denenmedi; yan profil, kapalı yüz ve değişen kamera yerleşimi sorun çıkarabilir.
+  Kurulum: `pip install 'opencv-python-headless<5'` (5.x sürümünde yüz bulucu yok).
+- **Ses seviyesi**: yeni kesimler -16 LUFS'a yaklaştırılır (tek geçişli loudnorm). Ölçüm: 5 klipte seviye farkı 3,9 LU'dan 2,0 LU'ya indi.
+- **Ölü sessizlik**: klip uzun bir sessizlikle başlıyor/bitiyorsa baş/son kırpılır (ses ve görüntü birlikte).
+- **Benzer klipler**: aynı anın iki kez bulunması ya da farklı projelerde benzer konuşma "benzer klip" etiketiyle işaretlenir.
+- **Başlık önerisi (isteğe bağlı)**: `ANTHROPIC_API_KEY` ayarlıysa Onay kutusunda "Claude ile öner" düğmesi çıkar; yalnız o düğmeye basınca
+  klibin konuşma metni Anthropic'e gönderilir. Anahtar yokken yerel, basit öneri kullanılır. Gerçek API ile bu oturumda denenmedi
+  (yalnız sahte yanıtla test edildi).
+- **İptal**: çalışan iş, alttaki çubuktan iptal edilir; çalışan ffmpeg/yt-dlp süreci öldürülür (konuşma çözme sürerken bir sonraki adımda durur).
+- **Bildirim**: izleyici ve web işleri bitince macOS bildirimi çıkar.
+- **Temizlik**: `createclip cleanup` neyin silineceğini gösterir, `--yes` ile siler. Yalnız yeniden üretilebilir dosyalar
+  (ham kesit, kare, ses indirmesi, reddedilen klipler); klipler ve sohbet kaydı kalır. `createclip keep <proje>` ya da arayüzde "Koru" ile
+  bir proje temizlik ve silmeden tamamen korunur; son N günde değişen projelere dokunulmaz.
+
+Yapılmayanlar: otomatik YouTube/TikTok/Instagram yükleme (API'ler denetim gerektirir, "hazır paket" kullan) ve ek an sinyalleri
+(kahkaha/anahtar kelime): etiketli veri olmadan iyileşme ölçülemediği için eklenmedi.
 
 ## Günlük ve hata ayıklama
 Her şey `output/createclip.log` dosyasına yazılır (dönen dosya): çalışan her dış komut, çıkış kodu, süre ve hata çıktısının sonu.

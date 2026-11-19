@@ -1,5 +1,6 @@
 """`createclip doctor`: check the things that actually broke on real setups (stalling yt-dlp handler, Whisper model
 asking the hub, missing tools, low disk, unreachable sites) and say what to do about each."""
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -52,6 +53,14 @@ def checks(root: Path, net: bool = True) -> list:
         add(OK, "Whisper modeli", "önbellekte (çevrimdışı yüklenir)")
     except Exception:  # noqa: BLE001
         add(WARN, "Whisper modeli", "önbellekte yok; ilk altyazıda ~3 GB iner")
+    try:
+        import cv2
+        add(OK if hasattr(cv2, "CascadeClassifier") else WARN, "OpenCV (yüz bulma)",
+            cv2.__version__ if hasattr(cv2, "CascadeClassifier") else f"{cv2.__version__} yüz bulucu içermiyor; pip install 'opencv-python-headless<5'")
+    except ImportError:
+        add(WARN, "OpenCV (yüz bulma)", "yok; 'Dikey · oyun + yüz' bulanık arka plana döner. pip install 'opencv-python-headless<5'")
+    add(OK if os.environ.get("ANTHROPIC_API_KEY") else WARN, "Claude başlık önerisi",
+        "ANTHROPIC_API_KEY ayarlı" if os.environ.get("ANTHROPIC_API_KEY") else "kapalı (isteğe bağlı)")
     free = shutil.disk_usage(Path(root) if Path(root).exists() else Path.home()).free / 1e9
     add(OK if free > 20 else WARN if free > 5 else FAIL, "disk", f"{free:.0f} GB boş" + ("" if free > 20 else " (klipler yer kaplar; ready/ ve raw/ temizle)"))
     if net:

@@ -6,6 +6,8 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
+from .log import run_ok
+
 FONT_DIR = Path(__file__).parent / "fonts"
 FONTS = {
     "montserrat": ("Montserrat.ttf", "ExtraBold"),
@@ -45,6 +47,16 @@ def probe_size(video: Path):
          "-of", "csv=p=0", str(video)], capture_output=True, text=True, check=True).stdout.strip()
     w, h = out.split(",")
     return int(w), int(h)
+
+
+def probe_duration(video: Path) -> float:
+    out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=duration",
+                          "-of", "csv=p=0", str(video)], capture_output=True, text=True, check=True).stdout.strip()
+    try:
+        return float(out)
+    except ValueError:
+        return float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
+                                     str(video)], capture_output=True, text=True, check=True).stdout.strip())
 
 
 def _chunks(words, size):
@@ -161,11 +173,13 @@ def render(video: Path, words, out: Path, style: dict | None = None):
             drawer.draw(ch, ai).save(p)
             add(p, e - s)
             t = e
+        total = probe_duration(video)
+        if total > t + 0.01:        # overlay=shortest=1 would otherwise cut the video at the last caption
+            add(td / "blank.png", total - t)
         (td / "list.txt").write_text("\n".join(entries + [entries[-1].split("\n")[0]]) + "\n")
         out.parent.mkdir(parents=True, exist_ok=True)
-        subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", str(video), "-f", "concat", "-safe", "0",
-                        "-i", str(td / "list.txt"), "-filter_complex",
-                        "[1:v]fps=30,format=rgba[o];[0:v][o]overlay=shortest=1:format=auto",
-                        "-c:v", "libx264", "-crf", "20", "-pix_fmt", "yuv420p", "-c:a", "aac", str(out)],
-                       check=True)
+        run_ok(["ffmpeg", "-y", "-v", "error", "-i", str(video), "-f", "concat", "-safe", "0",
+                "-i", str(td / "list.txt"), "-filter_complex",
+                "[1:v]fps=30,format=rgba[o];[0:v][o]overlay=shortest=1:format=auto",
+                "-c:v", "libx264", "-crf", "20", "-pix_fmt", "yuv420p", "-c:a", "aac", str(out)], "altyazı basma")
     return out
