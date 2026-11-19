@@ -95,6 +95,11 @@ def main(argv=None):
     cp.add_argument("--status", choices=["approved", "new", "all"], default="approved")
     cp.add_argument("--out", type=Path, default=ROOT)
 
+    au = sub.add_parser("autostart", help="oturum açılınca arayüzü + otomatik izlemeyi kendiliğinden başlat (macOS)")
+    au.add_argument("action", choices=["on", "off", "status"])
+    au.add_argument("--port", type=int, default=8765)
+    au.add_argument("--out", type=Path, default=ROOT)
+
     s = sub.add_parser("serve", help="yerel web arayüzünü başlat")
     s.add_argument("-v", "--verbose", action="store_true", help="ayrıntılı günlüğü ekrana da yaz")
     s.add_argument("--port", type=int, default=8765)
@@ -197,6 +202,15 @@ def main(argv=None):
         print(f"\nÇıktı klasörü: {m['dir']}  (kaynak: {m['source']})")
         for c in m["clips"]:
             print(f"  #{c['i']} skor {c['score']}  {c['captioned'] or c['plain']}")
+        return 0
+    if a.cmd == "autostart":
+        from . import autostart
+        if a.action == "on":
+            print(f"Açıldı: {autostart.on(a.out, a.port)}\nArayüz: http://127.0.0.1:{a.port}  (Ayarlar'dan 'Otomatik izle'yi aç)")
+        elif a.action == "off":
+            print("Kapatıldı." if autostart.off() else "Zaten kapalıydı.")
+        else:
+            print(autostart.status())
         return 0
     if a.cmd == "serve":
         import uvicorn

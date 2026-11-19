@@ -6,7 +6,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from . import dupes, pipeline, titles, transcribe
+from . import dupes, moments, pipeline, titles, transcribe
 from .log import log, run
 
 STATUSES = ("new", "approved", "rejected")
@@ -38,6 +38,12 @@ def _stamp(sec: float) -> str:
     return f"{sec // 3600}:{sec % 3600 // 60:02d}:{sec % 60:02d}"
 
 
+def credit(m: dict, rec: dict) -> str:
+    """Source credit with a timestamp, appended to every description."""
+    return (f"Kaynak yayın: {m.get('title', '')}\n{m.get('url', '')}\nAn: {_stamp(rec['start'])}\n"
+            f"(Yayıncı: {m.get('slug', '')})")
+
+
 def suggest(m: dict, rec: dict, text: str) -> dict:
     """Deterministic starting point (no model): first sentence as title, source credit with timestamp as description,
     frequent non-trivial words as tags. The user edits them in the inbox."""
@@ -50,9 +56,7 @@ def suggest(m: dict, rec: dict, text: str) -> dict:
         if w not in _STOP:
             freq[w] = freq.get(w, 0) + 1
     tags = [w for w, _ in sorted(freq.items(), key=lambda kv: (-kv[1], kv[0]))[:5]]
-    src = m.get("url", "")
-    desc = (f"{title}\n\nKaynak yayın: {m.get('title', '')}\n{src}\nAn: {_stamp(rec['start'])}\n"
-            f"(Yayıncı: {m.get('slug', '')})")
+    desc = f"{title}\n\n{credit(m, rec)}"
     return {"title": title, "description": desc, "tags": tags}
 
 
@@ -90,10 +94,12 @@ def inbox(root: Path, status: str = "new") -> list:
                          "description": rec["description"], "tags": rec.get("tags", []),
                          "source_title": m.get("title", ""), "slug": m.get("slug", ""), "exported": rec.get("exported"),
                          "reactions": bool(rec.get("reactions")), "banner": rec.get("banner") or "",
-                         "voice": bool(rec.get("voice")), "dup_of": None})
+                         "voice": bool(rec.get("voice")), "dup_of": None,
+                         "ai_score": rec.get("ai_score"), "ai_reason": rec.get("ai_reason") or "",
+                         "title_options": rec.get("title_options") or [], "rank": round(moments.rank(rec), 2)})
         if dirty:
             pipeline.save(jd, m)
-    rows.sort(key=lambda r: (-r["score"], r["project"]))
+    rows.sort(key=lambda r: (-r["rank"], r["project"]))
     if status in ("new", "all") and rows:
         for r in rows:
             r["text"] = clip_text_of(root, r)

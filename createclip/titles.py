@@ -1,10 +1,12 @@
-"""Title / description / tag suggestions with the Claude API. Opt-in and explicit: it only runs when the user
-presses the button AND ANTHROPIC_API_KEY is set, because the clip's transcript is sent to Anthropic.
-Without a key the deterministic suggestion from review.suggest() is used."""
+"""Title / description / tag suggestions: Gemini (free tier, preferred) or the Claude API. Opt-in: it only runs when
+a key is configured, because the clip's transcript is sent to that provider. Without a key the deterministic
+suggestion from review.suggest() is used."""
 import json
 import os
 import re
 import urllib.request
+
+from . import gemini
 
 API = "https://api.anthropic.com/v1/messages"
 MODEL = os.environ.get("CREATECLIP_TITLE_MODEL", "claude-sonnet-5-5")
@@ -15,7 +17,7 @@ class TitleError(RuntimeError):
 
 
 def available() -> bool:
-    return bool(os.environ.get("ANTHROPIC_API_KEY"))
+    return gemini.available() or bool(os.environ.get("ANTHROPIC_API_KEY"))
 
 
 def _post(body: dict, key: str) -> dict:
@@ -39,23 +41,31 @@ def prompt(m: dict, rec: dict, text: str) -> str:
 
 
 def parse(reply: dict) -> dict:
-    txt = "".join(b.get("text", "") for b in reply.get("content", []) if b.get("type") == "text")
+    return parse_text("".join(b.get("text", "") for b in reply.get("content", []) if b.get("type") == "text"))
+
+
+def parse_text(txt: str) -> dict:
     mt = re.search(r"\{.*\}", txt, re.S)
     if not mt:
-        raise TitleError("Claude yanıtında JSON yok.")
+        raise TitleError("Model yanıtında JSON yok.")
     try:
         d = json.loads(mt.group(0))
         titles = [str(t).strip() for t in d["basliklar"] if str(t).strip()][:3]
         tags = [str(t).strip().lstrip("#") for t in d.get("etiketler", []) if str(t).strip()][:10]
         desc = str(d.get("aciklama", "")).strip()
     except (ValueError, KeyError, TypeError) as e:
-        raise TitleError("Claude yanıtı beklenen biçimde değil.") from e
+        raise TitleError("Model yanıtı beklenen biçimde değil.") from e
     if not titles:
-        raise TitleError("Claude başlık üretmedi.")
+        raise TitleError("Model başlık üretmedi.")
     return {"titles": titles, "description": desc, "tags": tags}
 
 
-def generate(m: dict, rec: dict, text: str, post=_post) -> dict:
+def generate(m: dict, rec: dict, text: str, post=_post, gem=None) -> dict:
+    if len(text.split()) >= 4 and (gem or gemini.available()):
+        try:
+            return parse_text((gem or gemini.generate)(prompt(m, rec, text)))
+        except gemini.GeminiError as e:
+            raise TitleError(str(e)) from e
     key = os.environ.get("ANTHROPIC_API_KEY")
     if not key:
         raise TitleError("ANTHROPIC_API_KEY ayarlı değil (terminalde: export ANTHROPIC_API_KEY=...).")

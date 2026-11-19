@@ -16,9 +16,9 @@ main{max-width:1080px;margin:0 auto;padding:24px 16px 120px}
 h1{font-size:30px;letter-spacing:-.03em;margin:8px 0 6px}h2{font-size:18px;margin:0 0 10px;letter-spacing:-.01em}h3{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);margin:20px 0 8px}
 p.lead{color:var(--mut);margin:0 0 22px;max-width:640px}.mut{color:var(--mut)}.sm{font-size:13px}.ok{color:var(--ok)}.err{color:var(--bad)}
 .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px;box-shadow:var(--sh);margin-bottom:16px}
-input[type=text],input[type=number],select,textarea{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:9px 12px;min-width:0;outline:none}
+input[type=text],input[type=password],input[type=number],select,textarea{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:9px 12px;min-width:0;outline:none}
 input:focus,select:focus,textarea:focus{border-color:var(--acc);box-shadow:0 0 0 3px var(--acc2)}
-input[type=text],textarea{width:100%}textarea{min-height:90px;resize:vertical}input[type=range]{accent-color:var(--acc);width:100%}
+input[type=text],input[type=password],textarea{width:100%}textarea{min-height:90px;resize:vertical}input[type=range]{accent-color:var(--acc);width:100%}
 button.b{font:inherit;font-weight:600;border:0;border-radius:10px;padding:9px 16px;background:var(--acc);color:#fff;cursor:pointer}
 button.b:hover{filter:brightness(1.08)}button.b:disabled{opacity:.45;cursor:default;filter:none}
 button.g{font:inherit;font-weight:600;border:1px solid var(--line);border-radius:10px;padding:8px 14px;background:transparent;color:var(--fg);cursor:pointer}button.g:hover{border-color:var(--acc);color:var(--acc)}
@@ -65,6 +65,14 @@ kbd{border:1px solid var(--line);border-radius:5px;padding:0 6px;font-size:12px}
 <section id="v-new">
   <h1>Yayından klibe, tek link.</h1>
   <p class="lead">Kick VOD'u ya da biten bir YouTube yayınının linkini yapıştır. En iyi anları bulur, keser, altyazı ekler, istersen dikeye çevirir. Hepsi bu bilgisayarda çalışır.</p>
+  <div class="card" id="setup" hidden>
+    <h2>Otomatik moda geç <span class="sm mut">(bir kez, 1 dakika)</span></h2>
+    <p class="sm mut" style="margin-top:0">Kanalı ekle; uygulama yeni yayınları kendi bulsun, klip yapsın, başlık yazsın. Sabah yalnızca Onay kutusuna bakarsın.</p>
+    <div class="row"><input id="s_ch" type="text" placeholder="kick.com/kanaladi  ya da  youtube.com/@kanal" style="flex:1;min-width:220px"><select id="s_lay"><option value="face">Dikey · oyun + yüz</option><option value="blur">Dikey · bulanık arka plan</option><option value="none">Yatay</option></select></div>
+    <div class="row mt"><input id="s_key" type="password" placeholder="Gemini anahtarı (ücretsiz, isteğe bağlı)" style="flex:1;min-width:220px" autocomplete="off"><a class="sm" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">anahtar al</a></div>
+    <div class="sm mut" style="margin-top:6px">Gemini ile başlıklar otomatik yazılır ve anlar puanlanır. Ücretsiz katmanda gönderilen metin/ses Google tarafından ürün geliştirmede kullanılabilir.</div>
+    <div class="row mt"><button class="b" id="s_go">Kur ve otomatik izlemeyi aç</button><span class="sm mut" id="s_msg"></span></div>
+  </div>
   <div class="card">
     <div class="hero"><input id="url" type="text" placeholder="https://kick.com/kanal/videos/…  ya da  https://www.youtube.com/watch?v=…" autofocus><button class="b" id="go">Klip yap</button></div>
     <div class="sm mut" id="ytnote" style="display:none;margin-top:8px">YouTube: sohbet tekrarı varsa en iyi anlar sohbetten, yoksa ses seviyesinden bulunur (önce sorarım). Sürmekte olan canlı yayınlar bitince işlenebilir.</div>
@@ -139,7 +147,13 @@ kbd{border:1px solid var(--line);border-radius:5px;padding:0 6px;font-size:12px}
   <div class="card"><h2>Disk</h2><p class="sm mut" style="margin-top:0">Temizlik yalnız yeniden üretilebilir dosyaları (ham kesit, kare, ses indirmesi, reddedilen klipler) siler; klipler, altyazılar ve sohbet kaydı dokunulmaz. Korumalı (🔒) projelere ve son N günde değişenlere hiç dokunulmaz.</p>
     <div id="storage" class="list"></div>
     <div class="row mt"><label class="row">Şu günden eski olanlar <input type="number" id="cdays" value="14" min="1" style="width:70px"> gün</label><button class="g" id="cprev">Önizle</button><button class="b" id="capply" disabled>Temizle</button><span id="cmsg2" class="sm mut"></span></div></div>
-  <div class="card"><h2>Başlık önerisi (Claude)</h2><div id="aistat" class="sm"></div></div>
+  <div class="card"><h2>Otomatik mod</h2>
+    <label class="row"><input type="checkbox" id="aw"> Kanalları kendiliğinden izle ve yeni yayınları işle</label>
+    <div class="row mt"><label class="row">Her <input type="number" id="awh" min="0.5" max="24" step="0.5" style="width:70px"> saatte bir tara</label><span id="awst" class="sm mut"></span></div>
+    <p class="sm mut">Uygulama açıkken çalışır. Bilgisayar açılınca kendiliğinden başlasın istersen terminalde: <code>createclip autostart on</code>. Kick yayın kayıtlarını 7 günden önce siler; tarama sıklığını bundan kısa tut.</p></div>
+  <div class="card"><h2>Gemini (başlık + an puanı)</h2><div id="aistat" class="sm"></div>
+    <div class="row mt"><input id="gkey" type="password" placeholder="Gemini API anahtarı" style="flex:1;min-width:220px" autocomplete="off"><button class="b" id="gsave">Kaydet</button><button class="g" id="gclear">Kaldır</button></div>
+    <p class="sm mut">Ücretsiz anahtar: <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>. Her klibin konuşma metni ve kısa sesi Gemini'ye gider. Ücretsiz katmanda bu veri Google'ın ürünlerini geliştirmesi için kullanılabilir. Anahtar yalnız bu bilgisayarda (settings.json) saklanır.</p></div>
   <div class="card"><h2>Günlük</h2><div class="row"><button class="g" id="logload">Sunucu günlüğünü yükle</button><span class="sm mut" id="logfile"></span></div><pre class="log" id="logtxt2" style="display:none"></pre></div>
 </section>
 </main>
@@ -393,18 +407,22 @@ function renderInbox(){
   const v=$('inbox');
   if(!rows.length){v.innerHTML='<div class="card empty">Bu sekmede klip yok. Yeni klipler “Yeni” sekmesinden ya da kuyruktan gelir.</div>';return}
   const r=rows[ci],best=Math.max(...rows.map(x=>x.score))||1;
-  v.innerHTML=`<div class="card"><div class="sm mut" style="margin-bottom:10px">${ci+1} / ${rows.length} · ${esc(r.slug)} · ${esc(r.source_title)}</div>
+  const bulk=tab==='new'&&rows.filter(x=>!x.dup_of).length>1?`<div class="row" style="margin-bottom:10px"><button class="g" id="top3">★ En iyi 3'ü onayla</button><span class="sm mut">Onaylananlar hemen hazır pakete (Shorts) aktarılır.</span></div>`:'';
+  v.innerHTML=bulk+`<div class="card"><div class="sm mut" style="margin-bottom:10px">${ci+1} / ${rows.length} · ${esc(r.slug)} · ${esc(r.source_title)}</div>
   <div class="two" style="grid-template-columns:minmax(0,300px) minmax(0,1fr)"><div><video id="vid" src="${r.video}" controls playsinline style="width:100%;max-height:540px;border-radius:12px;background:#000"></video></div>
-  <div><div class="row"><span class="badge">skor ${r.score}</span><span class="sm mut">${r.length} sn · yayında ${hms(r.start)}</span>${r.reactions?'<span class="badge w">sohbet tepkisi</span>':''}${r.voice?'<span class="badge w">yorum</span>':''}${r.dup_of?`<span class="badge no" title="Aynı an/benzer konuşma: ${esc(r.dup_of)}">benzer klip</span>`:''}</div>
-  <div class="sc" style="margin:8px 0 12px"><i style="width:${Math.round(100*r.score/best)}%"></i></div>
-  <div class="row" style="justify-content:space-between"><span class="sm mut">Başlık</span>${aiOn?'<button class="g" id="ai" style="padding:3px 10px">✨ Claude ile öner</button>':''}</div>
-  <input type="text" id="t" value="${esc(r.title)}"><div id="aic" class="chips" style="margin-top:6px"></div>
+  <div><div class="row"><span class="badge">skor ${r.score}</span>${r.ai_score?`<span class="badge ${r.ai_score>=7?'':'w'}" title="${esc(r.ai_reason)}">AI ${r.ai_score}/10</span>`:''}<span class="sm mut">${r.length} sn · yayında ${hms(r.start)}</span>${r.reactions?'<span class="badge w">sohbet tepkisi</span>':''}${r.voice?'<span class="badge w">yorum</span>':''}${r.dup_of?`<span class="badge no" title="Aynı an/benzer konuşma: ${esc(r.dup_of)}">benzer klip</span>`:''}</div>
+  <div class="sc" style="margin:8px 0 ${r.ai_reason?'4px':'12px'}"><i style="width:${Math.round(100*r.score/best)}%"></i></div>${r.ai_reason?`<div class="sm mut" style="margin-bottom:10px">${esc(r.ai_reason)}</div>`:''}
+  <div class="row" style="justify-content:space-between"><span class="sm mut">Başlık</span>${aiOn?'<button class="g" id="ai" style="padding:3px 10px">✨ Yeniden öner</button>':''}</div>
+  <input type="text" id="t" value="${esc(r.title)}"><div id="aic" class="chips" style="margin-top:6px">${(r.title_options||[]).filter(t=>t!==r.title).map(t=>`<span style="cursor:pointer" data-t="${esc(t)}">${esc(t)}</span>`).join('')}</div>
   <div class="sm mut" style="margin:10px 0 4px">Açıklama (kaynak bağlantısı otomatik eklenir)</div><textarea id="d">${esc(r.description)}</textarea>
   <div class="sm mut" style="margin:10px 0 4px">Etiketler (virgülle)</div><input type="text" id="g" value="${esc(r.tags.join(', '))}">
   <div class="row mt"><button class="b okb" id="ba">Onayla (A)</button><button class="b nob" id="br">Reddet (R)</button><button class="g" id="bs">Sonra (S)</button>
   ${r.status==='approved'?'<select id="pf"><option value="shorts">YouTube Shorts</option><option value="reels">Instagram Reels</option><option value="tiktok">TikTok</option></select><button class="b" id="be">Hazır pakete aktar</button>':''}</div>
   <div id="res" class="sm mut" style="margin-top:10px">${r.exported?'Aktarıldı: '+esc(r.exported.dir):''}</div></div></div></div>`;
   ['t','d','g'].forEach(k=>$(k).addEventListener('change',saveRow));
+  $('aic').querySelectorAll('[data-t]').forEach(e=>e.onclick=()=>{$('t').value=e.dataset.t;saveRow()});
+  if($('top3'))$('top3').onclick=async()=>{const pick=rows.filter(x=>!x.dup_of).slice(0,3);if(!confirm(`${pick.length} klip onaylansın ve hazır pakete aktarılsın mı?\n\n`+pick.map(x=>'• '+x.title).join('\n')))return;
+    for(const x of pick)await api(`/api/projects/${x.project}/clips/${x.i}/review`,'POST',{status:'approved'});ci=0;loadInbox()};
   $('ba').onclick=()=>decide('approved');$('br').onclick=()=>decide('rejected');$('bs').onclick=()=>go(1);
   if($('be'))$('be').onclick=doExport;if($('ai'))$('ai').onclick=aiTitles;
 }
@@ -416,11 +434,11 @@ async function doExport(){const r=rows[ci];$('res').textContent='Hazırlanıyor�
   const x=await api(`/api/projects/${r.project}/clips/${r.i}/export`,'POST',{platform:$('pf').value}),j=await x.json();
   if(!x.ok){$('res').innerHTML='<span class="err">'+esc(j.detail||'Hata')+'</span>';return}
   $('res').innerHTML='Hazır: <b>'+esc(j.dir)+'</b>'+(j.warnings.length?'<div class="err">'+j.warnings.map(esc).join('<br>')+'</div>':'')}
-async function aiTitles(){const r=rows[ci];$('aic').innerHTML='<span>Claude düşünüyor…</span>';
+async function aiTitles(){const r=rows[ci];$('aic').innerHTML='<span>Düşünüyor…</span>';
   const x=await api(`/api/projects/${r.project}/clips/${r.i}/titles`,'POST'),j=await x.json();
   if(!x.ok){$('aic').innerHTML='<span class="err" style="border:0">'+esc(j.detail||'Hata')+'</span>';return}
   $('aic').innerHTML='';j.titles.forEach(t=>{const s=document.createElement('span');s.textContent=t;s.style.cursor='pointer';s.onclick=()=>{$('t').value=t;saveRow()};$('aic').append(s)});
-  if(j.description&&confirm('Claude\'un açıklama ve etiket önerisi de uygulansın mı?\n\n'+j.description)){const keep=r.description.split('\n\n').slice(1).join('\n\n');$('d').value=j.description+(keep?'\n\n'+keep:'');$('g').value=j.tags.join(', ');saveRow()}}
+  if(j.description&&confirm('Açıklama ve etiket önerisi de uygulansın mı?\n\n'+j.description)){const keep=r.description.split('\n\n').slice(1).join('\n\n');$('d').value=j.description+(keep?'\n\n'+keep:'');$('g').value=j.tags.join(', ');saveRow()}}
 $('compile').onclick=async()=>{$('cmsg').textContent='';const j=await startTask('/api/compile','POST',{n:+$('cn').value,status:'approved'},'Derleme hazırlanıyor');
   if(j&&j.status==='done')$('cmsg').innerHTML='Derleme hazır: <b>'+esc(j.result.path)+'</b> (kaynak listesi yanında .txt)';else if(j)$('cmsg').innerHTML='<span class="err">'+esc(j.error||'')+'</span>'};
 document.addEventListener('keydown',e=>{
@@ -454,13 +472,31 @@ async function loadSettings(){
   const s=await (await api('/api/storage')).json();
   $('storage').innerHTML=s.map(p=>`<div class="it"><span class="t" style="cursor:default"><b>${esc(p.name)}</b> <span class="mut sm">${MB(p.bytes)} · silinebilir ${MB(p.removable)} · ${p.age_days} gün önce</span></span><button class="g" data-n="${esc(p.name)}" data-k="${p.keep}">${p.keep?'🔒 Korumalı':'Koru'}</button></div>`).join('')||'<div class="empty">Proje yok.</div>';
   $('storage').querySelectorAll('button').forEach(b=>b.onclick=async()=>{await api(`/api/projects/${b.dataset.n}/keep?keep=${b.dataset.k!=='true'}`,'POST');loadSettings()});
-  try{const a=(await (await api('/api/titles-available')).json()).available;$('aistat').innerHTML=a?'<span class="ok">Etkin.</span> Onay kutusunda “✨ Claude ile öner”e basınca klibin konuşma metni Anthropic\'e gönderilir; başka hiçbir şey gönderilmez.':'Kapalı. Açmak için sunucuyu başlatmadan önce terminalde <code>export ANTHROPIC_API_KEY=…</code> ayarla. Anahtar yoksa başlıklar yerel ve basit önerilerle doldurulur.'}catch(e){}
+  try{const c=await (await api('/api/settings')).json();
+    $('aistat').innerHTML=c.gemini_set?`<span class="ok">Gemini etkin</span> ${esc(c.gemini_hint)}. Yeni klipler başlık ve puanla gelir.`:'Anahtar yok: başlıklar yerel ve basit önerilerle doldurulur, anlar yalnız sohbet/ses seviyesine göre sıralanır.';
+    $('aw').checked=c.auto_watch;$('awh').value=c.watch_hours;
+    $('awst').textContent=c.auto_watch&&c.next_scan?'Sonraki tarama: '+new Date(c.next_scan*1000).toLocaleTimeString('tr-TR',{hour:'2-digit',minute:'2-digit'}):'';
+  }catch(e){}
 }
+const putSet=b=>api('/api/settings','PUT',b);
+$('aw').onchange=async()=>{await putSet({auto_watch:$('aw').checked});loadSettings()};
+$('awh').onchange=async()=>{await putSet({watch_hours:+$('awh').value});loadSettings()};
+$('gsave').onclick=async()=>{if(!$('gkey').value.trim())return;await putSet({gemini_key:$('gkey').value});$('gkey').value='';loadSettings()};
+$('gclear').onclick=async()=>{await putSet({gemini_key:''});loadSettings()};
 $('cprev').onclick=async()=>{const r=await (await api('/api/cleanup','POST',{days:+$('cdays').value,apply:false})).json();planned=r;$('capply').disabled=!r.files;$('cmsg2').textContent=r.files?`${r.files} öğe, ${MB(r.bytes)} silinecek`:'Silinecek bir şey yok.'};
 $('capply').onclick=async()=>{if(!planned||!confirm(`${MB(planned.bytes)} silinsin mi? (yalnız ham kesit/kare/ses ve reddedilenler)`))return;const r=await (await api('/api/cleanup','POST',{days:+$('cdays').value,apply:true})).json();$('cmsg2').textContent=`${MB(r.freed)} boşaltıldı`;$('capply').disabled=true;loadSettings()};
 $('logload').onclick=async()=>{const r=await (await api('/api/log?n=400')).json();const e=$('logtxt2');e.style.display='block';e.textContent=r.text;$('logfile').textContent=r.file;e.scrollTop=1e9};
 
+// ---------------- ilk kurulum
+async function checkSetup(){try{const [c,ch]=await Promise.all([api('/api/settings').then(r=>r.json()),api('/api/channels').then(r=>r.json())]);
+  $('setup').hidden=!!(ch.length&&c.auto_watch)}catch(e){}}
+$('s_go').onclick=async()=>{const m=$('s_msg');m.textContent='';m.className='sm mut';
+  const u=$('s_ch').value.trim();if($('s_key').value.trim())await putSet({gemini_key:$('s_key').value});
+  if(u){const lay=$('s_lay').value,r=await api('/api/channels','POST',{url:u,layout:lay,max_height:lay==='none'?720:1080});
+    if(!r.ok){const d=(await r.json()).detail||'Hata';if(!/zaten/.test(d)){m.className='sm err';m.textContent=d;return}}}
+  await putSet({auto_watch:true});$('s_key').value='';m.textContent='Hazır. İlk tarama birazdan başlar; biten klipler Onay kutusuna düşer.';checkSetup();loadQueue&&loadQueue()};
+
 // ---------------- başlangıç
-fillPresets();setForm(lget('cc_form2',{}));pvUpdate();refreshCount();reattach();
+checkSetup();fillPresets();setForm(lget('cc_form2',{}));pvUpdate();refreshCount();reattach();
 {const q=new URLSearchParams(location.search).get('p'),h=location.hash.slice(1);if(q)openProject(q);else show(VIEWS.includes(h)?h:'new')}
 </script></body></html>

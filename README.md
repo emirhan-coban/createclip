@@ -98,7 +98,7 @@ zamanları 5 klipte ses başlangıçlarıyla karşılaştırıldı: medyan sapma
 
 ## Geliştirme
 ```bash
-./.venv/bin/python -m pytest -q       # 58 test
+./.venv/bin/python -m pytest -q       # 65 test
 ```
 Dosyalar: `kick.py` (VOD + sohbet), `peaks.py`, `audio_peaks.py`, `clipper.py`, `transcribe.py`, `captions.py`, `layout.py`,
 `youtube.py`, `sources.py` (YouTube + platform seçimi), `watch.py` (izleyici + kuyruk), `review.py` (onay kutusu + hazır paket), `ytdlp.py`, `log.py`, `pipeline.py` (iş akışı + düzenleme), `web/` (FastAPI + tek sayfa arayüz), `syncfix.py` (senkron ölçüm aracı).
@@ -159,6 +159,16 @@ Hiçbiri "politikaya uyar" garantisi değildir.
 
 Yapılmayanlar: otomatik YouTube/TikTok/Instagram yükleme (API'ler denetim gerektirir, "hazır paket" kullan) ve ek an sinyalleri
 (kahkaha/anahtar kelime): etiketli veri olmadan iyileşme ölçülemediği için eklenmedi.
+
+## Otomatik mod (Gemini ile)
+
+1. Arayüzde **Yeni** sekmesindeki kurulum kartına kanal linkini (ve istersen ücretsiz [Gemini anahtarını](https://aistudio.google.com/apikey)) yaz; **Kur ve otomatik izlemeyi aç**.
+2. Uygulama açıkken kanalları her N saatte bir tarar (varsayılan 3; Kick VOD'u 7 günde silinebilir), yeni yayınları işler, bitince bildirim verir.
+3. Gemini anahtarı varsa her klip **başlık, açıklama, etiket** ve **AI puanı (1-10)** ile gelir; Onay kutusu sırası `skor × (0.5 + AI/10)`. Anahtar yoksa eski davranış (yerel basit öneri, yalnız sohbet/ses skoru).
+4. **Onayla** = hemen `ready/<tarih>/…` hazır paketi (Shorts). "★ En iyi 3'ü onayla" toplu onay verir.
+5. Bilgisayar açılınca kendiliğinden başlasın: `createclip autostart on` (kapatmak: `off`).
+
+Notlar: Yükleme otomasyonu yoktur (kasıtlı). Anahtar `settings.json`'da (0600) saklanır. Ücretsiz katmanda gönderilen klip metni/sesi Google'ın ürün geliştirmesinde kullanılabilir. AI puanının sıralamayı ne kadar iyileştirdiği **ölçülmedi**; Gemini limit/model adı değişebilir (`CREATECLIP_GEMINI_MODEL` ile model seçilir, varsayılan `gemini-flash-latest`). Gemini gerçek anahtarla henüz denenmedi; testler sahte HTTP ile.
 
 ## Günlük ve hata ayıklama
 Her şey `output/createclip.log` dosyasına yazılır (dönen dosya): çalışan her dış komut, çıkış kodu, süre ve hata çıktısının sonu.

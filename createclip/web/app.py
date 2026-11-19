@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .. import cleanup as cleanupmod, compile as compilemod, layout as layoutmod, log as logmod, notify, pipeline, review as reviewmod, titles as titlesmod, transcribe, watch as watchmod
+from .. import autometa, cleanup as cleanupmod, settings as settingsmod, compile as compilemod, layout as layoutmod, log as logmod, notify, pipeline, review as reviewmod, titles as titlesmod, transcribe, watch as watchmod
 
 HTML = Path(__file__).with_name("index.html")
 
@@ -44,6 +44,12 @@ class CompileReq(BaseModel):
     n: int = 5
     status: str = "approved"
     title: str | None = None
+
+
+class SettingsReq(BaseModel):
+    gemini_key: str | None = None
+    auto_watch: bool | None = None
+    watch_hours: float | None = Field(None, ge=0.5, le=24)
 
 
 class CleanupReq(BaseModel):
@@ -99,6 +105,7 @@ def make_app(root: Path) -> FastAPI:
     root = Path(root)
     (root / "output").mkdir(parents=True, exist_ok=True)
     logfile = logmod.setup(root)
+    settingsmod.configure(root)
     STALL = 120        # seconds without progress before a task is flagged as stalled
     app = FastAPI(title="createclip")
     tasks: dict[str, dict] = {}
@@ -319,7 +326,14 @@ def make_app(root: Path) -> FastAPI:
     def review_clip(name: str, i: int, req: ReviewReq):
         d = _dir(name)
         try:
-            return reviewmod.review(d, i, **req.model_dump())
+            rec = reviewmod.review(d, i, **req.model_dump())
+            if rec.get("status") == "approved" and not rec.get("exported"):     # approved = ready package right away
+                try:
+                    reviewmod.export_pack(root, d, i, "shorts")
+                    rec = pipeline.get_clip(pipeline.load(d), i)
+                except Exception as e:  # noqa: BLE001
+                    logmod.log.warning("otomatik paket hazırlanamadı: %s", e)
+            return rec
         except KeyError:
             raise HTTPException(404, "klip yok")
         except ValueError as e:
@@ -379,14 +393,56 @@ def make_app(root: Path) -> FastAPI:
     @app.post("/api/queue/run")
     def queue_run():
         """Scan the channels now and work through the queue (one task, shown like any other job)."""
-        def job(progress):
-            watchmod.recover_running(root)
-            watchmod.scan(root)
-            n = 0
-            while watchmod.process_one(root, progress):
-                n += 1
-            return {"dir": str(root / "output"), "processed": n}
-        return {"id": spawn(job, label="kuyruk")}
+        return {"id": spawn(queue_job, label="kuyruk")}
+
+    auto = {"next": None, "last": None}
+
+    def queue_job(progress):
+        watchmod.recover_running(root)
+        watchmod.scan(root)
+        n = 0
+        while watchmod.process_one(root, progress):
+            n += 1
+        return {"dir": str(root / "output"), "processed": n}
+
+    def auto_loop():
+        """Auto-watch: while the switch is on, scan the channels every `watch_hours` and process what is new."""
+        while True:
+            time.sleep(30)
+            st = settingsmod.load()
+            if not st["auto_watch"]:
+                auto["next"] = None
+                continue
+            now = time.time()
+            if auto["next"] is None:
+                auto["next"] = now + 5
+            if now >= auto["next"]:
+                auto["next"] = now + st["watch_hours"] * 3600
+                if not any(t.get("label") == "kuyruk" and t["status"] == "running" for t in tasks.values()):
+                    auto["last"] = now
+                    logmod.log.info("otomatik tarama başladı")
+                    spawn(queue_job, label="kuyruk")
+
+    threading.Thread(target=auto_loop, daemon=True).start()
+
+    @app.get("/api/settings")
+    def get_settings():
+        return {**settingsmod.public(), "next_scan": auto["next"], "last_scan": auto["last"], "titles": titlesmod.available()}
+
+    @app.put("/api/settings")
+    def put_settings(req: SettingsReq):
+        ch = req.model_dump(exclude_none=True)
+        if "gemini_key" in ch:
+            ch["gemini_key"] = ch["gemini_key"].strip()
+        if ch.get("auto_watch") is False or "watch_hours" in ch:
+            auto["next"] = None
+        settingsmod.update(**ch)
+        return get_settings()
+
+    @app.post("/api/projects/{name}/autometa")
+    def run_autometa(name: str):
+        d = _dir(name)
+        return {"id": spawn(lambda progress: {"filled": autometa.fill(d), "dir": str(d)}, label="başlık/puan")}
 
     @app.post("/api/preview-style")
     def preview_style(req: PreviewReq):

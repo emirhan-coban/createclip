@@ -364,6 +364,10 @@ def run(url: str, root: Path, opts: Options, progress=_noop) -> dict:
             st, (k + fr) / len(plan), msg))
     m["defaults"]["snap"] = saved_snap
     save(jd, m)
+    from . import autometa                    # lazy: autometa imports this module
+    progress("meta", 0.98, "Başlık ve an puanı üretiliyor")
+    autometa.fill(jd, only={c["i"] for c in m["clips"] if c.get("ai_score") is None and not c.get("ai_titles_done")})
+    m = load(jd)
     progress("done", 1.0, "Bitti")
     m["dir"] = str(jd)
     return m

@@ -59,8 +59,12 @@ def checks(root: Path, net: bool = True) -> list:
             cv2.__version__ if hasattr(cv2, "CascadeClassifier") else f"{cv2.__version__} yüz bulucu içermiyor; pip install 'opencv-python-headless<5'")
     except ImportError:
         add(WARN, "OpenCV (yüz bulma)", "yok; 'Dikey · oyun + yüz' bulanık arka plana döner. pip install 'opencv-python-headless<5'")
+    from . import gemini, settings
+    settings.configure(root)
+    add(OK if gemini.available() else WARN, "Gemini (başlık + an puanı)",
+        "anahtar var" if gemini.available() else "anahtar yok: arayüzde Ayarlar'dan ekle (ücretsiz: aistudio.google.com/apikey)")
     add(OK if os.environ.get("ANTHROPIC_API_KEY") else WARN, "Claude başlık önerisi",
-        "ANTHROPIC_API_KEY ayarlı" if os.environ.get("ANTHROPIC_API_KEY") else "kapalı (isteğe bağlı)")
+        "ANTHROPIC_API_KEY ayarlı" if os.environ.get("ANTHROPIC_API_KEY") else "kapalı (isteğe bağlı, Gemini yeterli)")
     free = shutil.disk_usage(Path(root) if Path(root).exists() else Path.home()).free / 1e9
     add(OK if free > 20 else WARN if free > 5 else FAIL, "disk", f"{free:.0f} GB boş" + ("" if free > 20 else " (klipler yer kaplar; ready/ ve raw/ temizle)"))
     if net:
