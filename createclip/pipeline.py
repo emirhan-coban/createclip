@@ -175,8 +175,15 @@ def scout_clip(jd: Path, m: dict, start: float, end: float, score: float, opts_l
     s, e, rs, re_ = clipper.fetch_raw(m["url"], start, end, raw, m["duration"], d["max_height"],
                                       snap_cuts=d["snap"] if snap is None else snap,
                                       min_len=d["min_len"] - 5, max_len=d["max_len"] + 15)
+    preview = None
+    try:
+        preview = _rel(jd, clipper.make_preview(raw, s - rs, e - rs, jd / "preview" / f"{name}.mp4"))
+    except Cancelled:
+        raise
+    except Exception as ex:  # noqa: BLE001
+        log.warning("önizleme dosyası yapılamadı (%s), ham kesit kullanılacak: %s", name, ex)
     rec = {"i": i, "name": name, "score": score, "start": round(s, 2), "end": round(e, 2), "status": "draft",
-           "raw_start": rs, "raw_end": re_, "raw": _rel(jd, raw), "src": None,
+           "raw_start": rs, "raw_end": re_, "raw": _rel(jd, raw), "preview": preview, "src": None,
            "captions": d["captions"], "style": dict(opts_like["style"]), "layout": json.loads(json.dumps(opts_like["layout"])),
            "words": None, "srt": None, "base": None, "plain": None, "captioned": None,
            "reactions": bool(opts_like.get("reactions")), "banner": None, "overlaid": None, "voice": None, "voiced": None}
@@ -225,11 +232,56 @@ def render_one(jd: Path, m: dict, rec: dict, progress=_noop):
         r["src"] = _rel(jd, src)
     r["status"] = "new"
     _produce(jd, m, r, True, True, True, progress)
+    if r.get("preview"):                      # the finished clip replaces the draft preview
+        (jd / r["preview"]).unlink(missing_ok=True)
+        r["preview"] = None
     with _LOCK:
         rec.clear()
         rec.update(r)
         save(jd, m)
     return rec
+
+
+def backfill_previews(jd: Path) -> int:
+    """Repair drafts: a raw cut without video (old Kick bug) is downloaded again, a missing or video-less preview is
+    rebuilt. Returns how many drafts were fixed. Runs several downloads at once."""
+    jd = Path(jd)
+    m = load(jd)
+    todo = []
+    for c in m["clips"]:
+        if c.get("status") != "draft":
+            continue
+        raw = jd / c["raw"] if c.get("raw") else None
+        prev = jd / c["preview"] if c.get("preview") else None
+        bad_raw = not raw or not raw.exists() or not clipper.has_video(raw)
+        bad_prev = not prev or not prev.exists() or not clipper.has_video(prev)
+        if bad_raw or bad_prev:
+            todo.append((c, bad_raw))
+    done = {}
+
+    def fix(item):
+        c, bad_raw = item
+        raw = jd / (c.get("raw") or f"raw/{c['name']}_raw.mp4")
+        try:
+            if bad_raw:
+                clipper.download_range(m["url"], c["raw_start"], c["raw_end"], raw, m["defaults"]["max_height"])
+            done[c["i"]] = (_rel(jd, raw), _rel(jd, clipper.make_preview(raw, c["start"] - c["raw_start"], c["end"] - c["raw_start"],
+                                                                         jd / "preview" / f"{c['name']}.mp4")))
+        except Cancelled:
+            raise
+        except Exception as ex:  # noqa: BLE001
+            log.warning("taslak onarılamadı %s: %s", c["name"], ex)
+
+    if todo:
+        with ThreadPoolExecutor(min(4, len(todo))) as ex:
+            list(ex.map(fix, todo))
+        with _LOCK:
+            m2 = load(jd)
+            for c in m2["clips"]:
+                if c["i"] in done and c.get("status") == "draft":
+                    c["raw"], c["preview"] = done[c["i"]]
+            save(jd, m2)
+    return len(done)
 
 
 def render_many(jd: Path, m: dict, recs: list, progress=_noop) -> list:
@@ -291,8 +343,9 @@ def drop_drafts(jd: Path, ids: list | None = None):
     keep = []
     for c in m["clips"]:
         if c.get("status") == "draft" and (ids is None or c["i"] in ids):
-            if c.get("raw") and (jd / c["raw"]).exists():
-                (jd / c["raw"]).unlink()
+            for k in ("raw", "preview"):
+                if c.get(k) and (jd / c[k]).exists():
+                    (jd / c[k]).unlink()
         else:
             keep.append(c)
     m["clips"] = keep
@@ -390,7 +443,7 @@ def delete_clip(jd: Path, i: int):
     jd = Path(jd)
     m = load(jd)
     rec = get_clip(m, i)
-    for k in ("raw", "src", "base", "plain", "captioned", "words", "srt", "overlaid", "voice", "voiced"):
+    for k in ("raw", "preview", "src", "base", "plain", "captioned", "words", "srt", "overlaid", "voice", "voiced"):
         p = rec.get(k)
         if p and (jd / p).exists():
             (jd / p).unlink()

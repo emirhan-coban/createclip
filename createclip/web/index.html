@@ -199,7 +199,7 @@ async function loadHome(){
   try{showSpeed((await (await api('/api/settings')).json()).fast)}catch(e){}
   try{drafts=await (await api('/api/drafts')).json();
     ready=[...await (await api('/api/inbox?status=new')).json(),...await (await api('/api/inbox?status=approved')).json()];
-    picked=new Set([...picked].filter(k=>drafts.some(d=>dk(d)===k)));renderHome()}catch(e){}
+    picked=new Set([...picked].filter(k=>drafts.some(d=>dk(d)===k)));renderHome();if(drafts.some(d=>d.fixing||d.video.includes('/raw/')))setTimeout(loadHome,10000)}catch(e){}
 }
 const refreshCount=()=>{};
 function renderHome(){

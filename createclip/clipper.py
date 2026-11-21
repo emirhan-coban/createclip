@@ -34,6 +34,19 @@ def format_selector(h: int) -> str:
             f"bv*[height<={h}]+ba/b[height<={h}]/b")
 
 
+def has_video(p: Path) -> bool:
+    """True when the file has a video stream (a Kick HLS section once came back as audio only)."""
+    out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=codec_type",
+                          "-of", "csv=p=0", str(p)], capture_output=True, text=True).stdout
+    return "video" in out
+
+
+def _kick_args(url: str) -> list:
+    """Kick's HLS (some VODs) needs a longer probe, otherwise ffmpeg finds no video dimensions at the cut point and the
+    section comes back as audio only (measured: with these input options the video is there, 3 s for 20 s of footage)."""
+    return ["--downloader-args", "ffmpeg_i:-analyzeduration 60M -probesize 60M"] if "kick.com" in url else []
+
+
 def download_range(url: str, start: float, end: float, out: Path, max_height: int = 720) -> Path:
     """Stream-copy the range (no re-encoding, so several can run in parallel). `--force-keyframes-at-cuts` is
     deliberately not used: it re-encodes the whole section. Measured on YouTube at off-grid starts: the copy is
@@ -48,14 +61,17 @@ def download_range(url: str, start: float, end: float, out: Path, max_height: in
             old.unlink()
         try:
             p = run(
-                ytdlp.cmd("-q", "--socket-timeout", "30", "-f", format_selector(max_height),
+                ytdlp.cmd("-q", "--socket-timeout", "30", *_kick_args(url), "-f", format_selector(max_height),
                  "--merge-output-format", "mp4", "--download-sections", f"*{hms(start)}-{hms(end)}", "-o",
                  str(out.with_suffix("")) + ".%(ext)s", url), f"indirme {hms(start)}-{hms(end)} (deneme {attempt + 1})", timeout=240)
         except subprocess.TimeoutExpired:
             err = "indirme zaman aşımına uğradı"
             continue
         if p.returncode == 0 and produced.exists():
-            return produced
+            if has_video(produced):
+                return produced
+            err = "indirilen kesitte görüntü akışı yok"
+            continue
         err = p.stderr.strip()[-300:] or err
     raise RuntimeError("Klip kesilemedi: " + err)
 
@@ -122,6 +138,16 @@ def fetch_raw(url: str, start: float, end: float, raw: Path, duration: float, ma
         if b3 - a3 >= min_len:
             a, b = a3, b3
     return raw_start + a, raw_start + b, raw_start, raw_end
+
+
+def make_preview(raw: Path, a: float, b: float, out: Path) -> Path:
+    """Small browser-safe preview of the window [a, b] of a raw copy-cut file: the raw one starts before its first
+    keyframe and carries Opus audio, which some browsers play as black video + sound. 360p H.264 + AAC plays everywhere."""
+    out.parent.mkdir(parents=True, exist_ok=True)
+    run_ok(["ffmpeg", "-y", "-v", "error", "-ss", f"{a:.3f}", "-to", f"{b:.3f}", "-i", str(raw), "-vf", f"scale=-2:360,{encode.fps_filter()}",
+            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "30", "-pix_fmt", "yuv420p", "-threads", "2",
+            "-c:a", "aac", "-b:a", "64k", "-ac", "1", "-movflags", "+faststart", str(out)], "önizleme", timeout=300)
+    return out
 
 
 def make_clip(url: str, start: float, end: float, raw: Path, out: Path, duration: float,

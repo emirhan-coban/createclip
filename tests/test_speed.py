@@ -198,3 +198,60 @@ def test_speed_switch_changes_priority_threads_and_workers(tmp_path, monkeypatch
     c.put("/api/settings", json={"fast": False})
     assert logmod.GENTLE is True
     logmod.set_gentle(True)
+
+
+def _make(tmp_path, name, video=True):
+    import subprocess
+    p = tmp_path / name
+    cmd = ["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "sine=d=1"]
+    if video:
+        cmd += ["-f", "lavfi", "-i", "testsrc=s=64x64:d=1", "-pix_fmt", "yuv420p"]
+    subprocess.run(cmd + [str(p)], check=True, stdin=subprocess.DEVNULL)
+    return p
+
+
+def test_has_video_detects_audio_only(tmp_path):
+    assert clipper.has_video(_make(tmp_path, "av.mp4")) and not clipper.has_video(_make(tmp_path, "a.m4a", video=False))
+
+
+def test_kick_gets_longer_probe_others_do_not():
+    assert "-probesize" in " ".join(clipper._kick_args("https://kick.com/x/videos/1"))
+    assert clipper._kick_args("https://www.youtube.com/watch?v=1") == []
+
+
+def test_audio_only_download_is_retried_then_fails(tmp_path, monkeypatch):
+    import subprocess
+    calls = []
+
+    def fake_run(cmd, what, timeout=None, **kw):
+        calls.append(what)
+        _make(tmp_path / "raw", "c.mp4", video=False) if (tmp_path / "raw").mkdir(exist_ok=True) is None else None
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+    monkeypatch.setattr(clipper, "run", fake_run)
+    with pytest.raises(RuntimeError, match="görüntü akışı yok"):
+        clipper.download_range("https://kick.com/x/videos/1", 100, 160, tmp_path / "raw" / "c.mp4")
+    assert len(calls) == 3
+
+
+def test_backfill_redownloads_videoless_raw_and_rebuilds_preview(tmp_path, monkeypatch):
+    jd, m = _manifest(tmp_path)
+    (jd / "raw").mkdir()
+    (jd / "preview").mkdir()
+    bad_raw = _make(jd / "raw", "r.mp4", video=False)
+    bad_prev = _make(jd / "preview", "p.mp4", video=False)
+    m["clips"] = [{"i": 1, "name": "c1", "status": "draft", "start": 110.0, "end": 150.0, "raw_start": 100.0, "raw_end": 160.0,
+                   "raw": "raw/r.mp4", "preview": "preview/p.mp4", "score": 1}]
+    pipeline.save(jd, m)
+    fetched = []
+
+    def fake_dl(url, s, e, out, h=720):
+        fetched.append((s, e))
+        _make(out.parent, out.name, video=True)
+        return out
+    monkeypatch.setattr(clipper, "download_range", fake_dl)
+    monkeypatch.setattr(clipper, "make_preview", lambda raw, a, b, out: _make(out.parent, out.name, video=True))
+    assert pipeline.backfill_previews(jd) == 1
+    assert fetched == [(100.0, 160.0)]
+    assert clipper.has_video(jd / "raw/r.mp4") and clipper.has_video(jd / "preview/c1.mp4")
+    assert pipeline.load(jd)["clips"][0]["preview"] == "preview/c1.mp4"
+    assert pipeline.backfill_previews(jd) == 0                       # healthy drafts are left alone

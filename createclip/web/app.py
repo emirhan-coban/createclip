@@ -230,6 +230,9 @@ def make_app(root: Path) -> FastAPI:
             return {"dir": Path(m["dir"]).name}
         return {"id": spawn(job, label=req.url)}
 
+    previewing: set = set()
+    checked: set = set()
+
     @app.get("/api/drafts")
     def drafts():
         """Raw previews waiting to be picked: [{project, i, score, video, a, b, ...}], newest project first."""
@@ -240,10 +243,27 @@ def make_app(root: Path) -> FastAPI:
             except Exception:  # noqa: BLE001
                 continue
             for c in sorted(m["clips"], key=lambda c: -(c.get("score") or 0)):
-                if c.get("status") == "draft" and c.get("raw") and (d.parent / c["raw"]).exists():
+                if c.get("status") != "draft":
+                    continue
+                prev = c.get("preview") and (d.parent / c["preview"]).exists()
+                if prev or (c.get("raw") and (d.parent / c["raw"]).exists()):
+                    a, b = (0.0, c["end"] - c["start"]) if prev else (c["start"] - c["raw_start"], c["end"] - c["raw_start"])
                     out.append({"project": d.parent.name, "i": c["i"], "score": c.get("score") or 0, "slug": m["slug"],
-                                "video": f"/files/{d.parent.name}/{c['raw']}", "a": round(c["start"] - c["raw_start"], 2),
-                                "b": round(c["end"] - c["raw_start"], 2), "at": c["start"], "length": round(c["end"] - c["start"])})
+                                "video": f"/files/{d.parent.name}/{c['preview'] if prev else c['raw']}", "a": round(a, 2),
+                                "b": round(b, 2), "at": c["start"], "length": round(c["end"] - c["start"]),
+                                "fixing": d.parent.name in previewing})
+            if d.parent.name not in checked:                   # once per start: repair/rebuild previews in the background
+                checked.add(d.parent.name)
+                previewing.add(d.parent.name)
+
+                def work(jd=d.parent):
+                    try:
+                        pipeline.backfill_previews(jd)
+                    except Exception as e:  # noqa: BLE001
+                        logmod.log.warning("önizleme onarımı: %s", e)
+                    finally:
+                        previewing.discard(jd.name)
+                threading.Thread(target=work, daemon=True).start()
         return out
 
     @app.post("/api/render")
