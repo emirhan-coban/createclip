@@ -1,9 +1,12 @@
 """Word-level Turkish transcription with mlx-whisper (large-v3, Apple Silicon GPU).
 No separate alignment model is needed: word times come from Whisper's own attention (DTW)."""
 import json
+import os
 from pathlib import Path
 
-MODEL = "mlx-community/whisper-large-v3-mlx"
+# large-v3 stays the default: on 6 real Turkish clips large-v3-turbo was 3-5x faster but dropped whole stretches of
+# speech in 2 of them (37% / 44% of the words large-v3 found). CREATECLIP_WHISPER_MODEL overrides it (e.g. for English).
+MODEL = os.environ.get("CREATECLIP_WHISPER_MODEL", "mlx-community/whisper-large-v3-mlx")
 
 
 def build_prompt(vocab: str = "") -> str:

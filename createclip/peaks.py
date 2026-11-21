@@ -45,8 +45,9 @@ def peaks_from_scores(scores, duration, n=5, lead=20, min_len=25, max_len=60,
                       skip_start=120, skip_end=60, min_gap=90, mean=None, sd=None):
     if not scores:
         return []
-    mean = statistics.fmean(scores) if mean is None else mean
-    sd = (statistics.pstdev(scores) if sd is None else sd) or 1.0
+    base = scores[int(skip_start // BIN):] or scores     # the skipped opening (crowded intro chat) must not skew the baseline
+    mean = statistics.fmean(base) if mean is None else mean
+    sd = (statistics.pstdev(base) if sd is None else sd) or 1.0
     z = [(s - mean) / sd for s in scores]
     order = sorted(range(len(z)), key=lambda i: -z[i])
     peaks = []
@@ -56,7 +57,7 @@ def peaks_from_scores(scores, duration, n=5, lead=20, min_len=25, max_len=60,
             continue
         if any(abs(t - p.time) < min_gap for p in peaks):
             continue
-        start = max(0.0, t - lead)
+        start = max(skip_start, t - lead)
         j = i + 2                        # extend while density stays clearly above baseline
         while j < len(z) and (j * BIN - start) < max_len and z[j] > 0.5:
             j += 1
@@ -103,7 +104,7 @@ def _bins(ws):
     return smooth([ws[2 * i] + ws[2 * i + 1] for i in range(len(ws) // 2)])
 
 
-def coarse_candidates(msgs, starts, duration, n=40):
+def coarse_candidates(msgs, starts, duration, n=40, skip_start=120):
     """Peak times (s) estimated from the sparsely sampled windows only (stage 1 of smart mode)."""
     nw = int(duration // WIN) + 1
     ws = window_scores(msgs, nw)
@@ -113,7 +114,7 @@ def coarse_candidates(msgs, starts, duration, n=40):
     for i in have:                      # a sampled window stands for its neighbours: only used to rank regions
         for j in range(max(0, i - k // 2), min(len(ws), i + k // 2 + 1)):
             filled[j] = max(filled[j], ws[i])
-    pk = peaks_from_scores(_bins(filled), duration, n=n, min_gap=60)
+    pk = peaks_from_scores(_bins(filled), duration, n=n, min_gap=60, skip_start=skip_start)
     return [p.time for p in pk]
 
 

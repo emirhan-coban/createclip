@@ -65,7 +65,7 @@ def test_export_pack_files_and_warnings(tmp_path):
 def test_web_inbox_review_export_and_queue(tmp_path):
     make_project(tmp_path)
     c = TestClient(make_app(tmp_path))
-    assert len(c.get("/api/inbox").json()) == 2 and "Onay kutusu" in c.get("/inbox").text
+    assert len(c.get("/api/inbox").json()) == 2 and "Hazır klipler" in c.get("/inbox").text
     assert c.post("/api/projects/kanal-01abcdef/clips/1/review", json={"status": "approved"}).status_code == 200
     assert c.post("/api/projects/kanal-01abcdef/clips/9/review", json={"status": "approved"}).status_code == 404
     r = c.post("/api/projects/kanal-01abcdef/clips/1/export", json={"platform": "tiktok"})

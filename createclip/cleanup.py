@@ -45,6 +45,8 @@ def _targets(jd: Path) -> list:
         t += list(jd.glob(g))
     try:
         m = pipeline.load(jd)
+        if any(c.get("status") == "draft" for c in m.get("clips", [])):       # drafts play from their raw footage
+            t = [p for p in t if p.name != "raw"]
         for c in m.get("clips", []):
             if c.get("status") == "rejected":
                 t += [jd / c[k] for k in ("src", "base", "plain", "captioned", "overlaid", "voiced") if c.get(k) and (jd / c[k]).exists()]

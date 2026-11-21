@@ -15,7 +15,7 @@ def vod_info(url: str) -> kick.Vod:
     return youtube.vod_info(url) if platform(url) == "youtube" else kick.vod_info(url)
 
 
-def fetch_chat(vod: kick.Vod, cache_dir, progress=None, mode: str = "smart") -> kick.ChatData:
+def fetch_chat(vod: kick.Vod, cache_dir, progress=None, mode: str = "smart", start: float = 0.0) -> kick.ChatData:
     if platform(vod.url) == "youtube":
-        return youtube.fetch_chat(vod, cache_dir, progress, mode)
-    return kick.fetch_chat(vod, cache_dir, progress=progress, mode=mode)
+        return youtube.fetch_chat(vod, cache_dir, progress, mode, start=start)
+    return kick.fetch_chat(vod, cache_dir, progress=progress, mode=mode, start=start)

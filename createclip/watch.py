@@ -194,6 +194,7 @@ def options_for(root: Path, item: dict, confirmed: bool = False) -> pipeline.Opt
     ch = next((c for c in load_channels(root) if c["url"] == item.get("channel")), {})
     names = {f.name for f in fields(pipeline.Options)}
     kw = {k: v for k, v in (ch.get("options") or {}).items() if k in names}
+    kw.setdefault("drafts", 15)          # overnight: the best few are rendered, the rest wait as previews to pick from
     kw["audio_ok"] = bool(kw.get("audio_ok")) or confirmed or bool(item.get("confirmed"))
     return pipeline.Options(**kw)
 

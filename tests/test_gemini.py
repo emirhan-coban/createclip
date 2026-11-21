@@ -84,3 +84,9 @@ def test_autometa_fills_new_but_never_overwrites_edits(tmp_path):
     assert got[0]["title"] == "Yeni" and got[0]["title_options"] == ["Yeni", "Alt"] and "Kaynak yayın" in got[0]["description"]
     assert got[1]["title"] == "benim başlığım" and got[1]["ai_score"] == 8
     assert autometa.fill(jd, titles_fn=t, score_fn=sc) == 0           # idempotent
+
+
+def test_overlap_resume_rule():
+    assert pipeline._overlaps(100, 160, 110, 170)          # mostly the same moment
+    assert not pipeline._overlaps(100, 160, 150, 210)      # touches only 10 of 60 seconds
+    assert not pipeline._overlaps(100, 160, 400, 460)

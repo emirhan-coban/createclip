@@ -2,6 +2,8 @@
 the UI shows live. `run()` wraps subprocesses so every external command leaves cmd, exit code, time, stderr tail."""
 import logging
 import logging.handlers
+import os
+import signal
 import subprocess
 import threading
 import time
@@ -71,15 +73,34 @@ def cancel_requested() -> bool:
     return _cancel.is_set()
 
 
+# Gentle by default: the heavy tools (ffmpeg, yt-dlp, ...) run at low priority so the computer stays usable while
+# clips are made. The UI's Yavaş/Hızlı switch (settings "fast") or CREATECLIP_FAST=1 turns this off (full speed).
+GENTLE = os.environ.get("CREATECLIP_FAST") != "1"
+
+
+def set_gentle(on: bool):
+    global GENTLE
+    GENTLE = bool(on)
+
+
+def _kill(p):
+    """Kill the whole process group: yt-dlp spawns ffmpeg, and an orphaned ffmpeg keeps the output pipes open,
+    which left communicate() (and the cancel button) hanging forever."""
+    try:
+        os.killpg(p.pid, signal.SIGKILL)
+    except (OSError, ProcessLookupError):
+        try:
+            p.kill()
+        except OSError:
+            pass
+
+
 def request_cancel():
     """Ask the running job to stop: later steps raise Cancelled, running subprocesses are killed."""
     _cancel.set()
     with _proc_lock:
         for p in list(_procs):
-            try:
-                p.kill()
-            except OSError:
-                pass
+            _kill(p)
 
 
 def clear_cancel():
@@ -97,13 +118,14 @@ def run(cmd: list, what: str, timeout: float | None = None, **kw) -> subprocess.
     check_cancel()
     t0 = time.time()
     log.debug("%s: %s", what, " ".join(str(c) for c in cmd)[:300])
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, **kw)
+    proc = subprocess.Popen((["nice", "-n", "10"] if GENTLE else []) + [str(c) for c in cmd], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                            start_new_session=True, **kw)
     with _proc_lock:
         _procs.add(proc)
     try:
         out, err = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
-        proc.kill()
+        _kill(proc)
         proc.communicate()
         log.error("%s: zaman aşımı (%ss)", what, timeout)
         raise

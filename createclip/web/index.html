@@ -56,73 +56,26 @@ canvas{border:1px solid var(--line);border-radius:8px;cursor:crosshair;max-width
 .empty{text-align:center;color:var(--mut);padding:34px 10px}
 kbd{border:1px solid var(--line);border-radius:5px;padding:0 6px;font-size:12px}
 .hint{font-size:12px;color:var(--mut)}
+.dgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px}
+.dc{background:var(--card);border:2px solid var(--line);border-radius:14px;overflow:hidden;display:flex;flex-direction:column}.dc.sel{border-color:var(--acc);box-shadow:0 0 0 3px var(--acc2)}
+.dc video{width:100%;aspect-ratio:16/9;background:#000;display:block}.dc .in{padding:10px 12px;display:flex;gap:8px;align-items:center;justify-content:space-between}
+.pickbar{position:sticky;top:58px;z-index:15;display:flex;gap:12px;align-items:center;justify-content:space-between;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:10px 14px;margin:0 0 14px;box-shadow:var(--sh)}
 </style></head><body>
 <header><div class="bar-in"><div class="logo">create<i>clip</i></div>
-<nav id="nav"><button data-v="new">Yeni</button><button data-v="inbox">Onay kutusu<span class="n" id="ninbox" style="display:none"></span></button><button data-v="projects">Projeler</button><button data-v="channels">Kanallar</button><button data-v="settings">Ayarlar</button></nav></div></header>
+<nav id="nav"><button data-v="home">Klipler</button><button data-v="adv">Gelişmiş</button></nav></div></header>
 <main>
 
-<!-- ============ YENİ ============ -->
-<section id="v-new">
-  <h1>Yayından klibe, tek link.</h1>
-  <p class="lead">Kick VOD'u ya da biten bir YouTube yayınının linkini yapıştır. En iyi anları bulur, keser, altyazı ekler, istersen dikeye çevirir. Hepsi bu bilgisayarda çalışır.</p>
-  <div class="card" id="setup" hidden>
-    <h2>Otomatik moda geç <span class="sm mut">(bir kez, 1 dakika)</span></h2>
-    <p class="sm mut" style="margin-top:0">Kanalı ekle; uygulama yeni yayınları kendi bulsun, klip yapsın, başlık yazsın. Sabah yalnızca Onay kutusuna bakarsın.</p>
-    <div class="row"><input id="s_ch" type="text" placeholder="kick.com/kanaladi  ya da  youtube.com/@kanal" style="flex:1;min-width:220px"><select id="s_lay"><option value="face">Dikey · oyun + yüz</option><option value="blur">Dikey · bulanık arka plan</option><option value="none">Yatay</option></select></div>
-    <div class="row mt"><input id="s_key" type="password" placeholder="Gemini anahtarı (ücretsiz, isteğe bağlı)" style="flex:1;min-width:220px" autocomplete="off"><a class="sm" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">anahtar al</a></div>
-    <div class="sm mut" style="margin-top:6px">Gemini ile başlıklar otomatik yazılır ve anlar puanlanır. Ücretsiz katmanda gönderilen metin/ses Google tarafından ürün geliştirmede kullanılabilir.</div>
-    <div class="row mt"><button class="b" id="s_go">Kur ve otomatik izlemeyi aç</button><span class="sm mut" id="s_msg"></span></div>
-  </div>
+<!-- ============ KLİPLER ============ -->
+<section id="v-home">
+  <h1>Linki yapıştır, klipler hazır olsun.</h1>
+  <p class="lead">Kick VOD'u ya da biten bir YouTube yayını. En iyi anlar önizleme olarak gelir; beğendiklerini seç, dikey altyazılı videoya çevrilsin.</p>
   <div class="card">
-    <div class="hero"><input id="url" type="text" placeholder="https://kick.com/kanal/videos/…  ya da  https://www.youtube.com/watch?v=…" autofocus><button class="b" id="go">Klip yap</button></div>
-    <div class="sm mut" id="ytnote" style="display:none;margin-top:8px">YouTube: sohbet tekrarı varsa en iyi anlar sohbetten, yoksa ses seviyesinden bulunur (önce sorarım). Sürmekte olan canlı yayınlar bitince işlenebilir.</div>
-    <div class="row mt" style="gap:18px">
-      <div><div class="sm mut" style="margin-bottom:4px">Biçim</div><div class="seg" id="fmt"><button data-v="none">Yatay</button><button data-v="blur" class="on">Dikey</button><button data-v="face">Dikey · oyun + yüz</button></div></div>
-      <div><div class="sm mut" style="margin-bottom:4px">Klip sayısı</div><input id="n" type="number" min="1" max="15" value="5" style="width:80px"></div>
-      <div style="align-self:end" class="row"><label class="tog"><input id="cap" type="checkbox" checked> Altyazı</label><label class="tog" title="O anda sohbete yazılan mesajlar videoda görünür (özgün katkı)"><input id="react" type="checkbox"> Sohbet tepkisi</label></div>
-    </div>
-    <div class="sm mut" id="reshint" style="display:none;margin-top:8px">Dikeyde kaynak kırpılıp büyütüldüğü için 1080p önerilir; gelişmiş ayarlardan seçebilirsin.</div>
-    <details class="adv"><summary>Gelişmiş ayarlar</summary>
-      <h3>Sohbet</h3>
-      <div class="modes" id="modes">
-        <div class="mode sel" data-v="smart"><b>Akıllı (önerilen)</b><span class="sm mut">Önce sohbetin seyrek örneği, sonra yalnız en hareketli bölgeler. Ölçüm: 6 saatlik yayın ≈ 24 dk; en iyi 5 an tam indirmeyle aynı.</span></div>
-        <div class="mode" data-v="full"><b>Tam sohbet</b><span class="sm mut">Her pencere indirilir. Ölçüm: 6 saatlik yayın ≈ 57 dk (Kick ~1,5 istek/sn'ye izin verir).</span></div>
-        <div class="mode" data-v="audio"><b>Ses seviyesi · sohbetsiz</b><span class="sm mut">Sohbet indirilmez; düşük kaliteli kayıt indirilip ses yüksekliğine bakılır.</span></div>
-      </div>
-      <div class="row mt"><label class="row">Kaynak <select id="source"><option value="auto">Otomatik (sohbet, olmazsa ses)</option><option value="chat">Yalnız sohbet</option></select></label></div>
-      <h3>Klipler</h3>
-      <div class="row">
-        <label class="row">Süre <input id="minlen" type="number" min="10" max="120" value="25" style="width:70px">–<input id="maxlen" type="number" min="15" max="180" value="60" style="width:70px"> sn</label>
-        <label class="row">Pikten önce <input id="lead" type="number" min="0" max="60" value="20" style="width:70px"> sn</label>
-        <label class="row">Çözünürlük <select id="res"><option value="480">480p</option><option value="720" selected>720p</option><option value="1080">1080p</option></select></label>
-        <label class="tog"><input id="snap" type="checkbox" checked> Kesimleri konuşma aralarına hizala</label>
-        <label class="tog"><input id="plain" type="checkbox" checked> Altyazısızı da tut</label>
-      </div>
-      <h3>Altyazı stili</h3>
-      <div class="two"><div class="grid2">
-        <span>Font</span><select id="font"><option value="montserrat">Montserrat</option><option value="poppins">Poppins</option><option value="gabarito">Gabarito</option></select>
-        <span>Boyut</span><span class="row"><label class="tog"><input type="checkbox" id="szauto" checked> otomatik</label><input type="range" id="sz" min="0.03" max="0.12" step="0.002" value="0.052" style="flex:1"></span>
-        <span>Dikey konum</span><input type="range" id="yp" min="0.2" max="0.92" step="0.01" value="0.72">
-        <span>Kelime/ekran</span><select id="ch"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select>
-        <span>Renkler</span><span class="row"><input type="color" id="ac" value="#FFDD00"> aktif <input type="color" id="co" value="#FFFFFF"> diğer</span>
-        <span>Kontur</span><input type="range" id="stk" min="0.3" max="2.5" step="0.1" value="1">
-        <span>Yazı</span><span class="row"><label class="tog"><input type="checkbox" id="up" checked> BÜYÜK HARF</label><label class="tog"><input type="checkbox" id="mask"> küfürü yıldızla</label></span>
-        <span>Senkron</span><span class="row"><input type="range" id="sync" min="-0.5" max="0.5" step="0.02" value="-0.08" style="flex:1"><span id="syncv" class="sm mut">-0.08 sn</span></span>
-      </div><div><img id="pv" class="pv" alt="Altyazı önizleme"></div></div>
-      <h3>Diğer</h3>
-      <div class="row"><input id="vocab" type="text" placeholder="Özel kelimeler (örn. Berk, Derbeder) — çoğunlukla boş bırak"></div>
-      <div class="row mt"><input id="at" type="text" placeholder="Elle zamanlar (virgülle): 1:44:50, 0:27:50-0:28:40 — doluysa otomatik bulma yapılmaz"></div>
-      <div class="row mt"><select id="preset"></select><button class="g" id="psave">Bu ayarları kaydet</button><button class="g" id="pdel">Ön ayarı sil</button></div>
-    </details>
+    <div class="hero"><input id="url" type="text" placeholder="https://kick.com/kanal/videos/…  ya da  https://www.youtube.com/watch?v=…" autofocus><button class="b" id="go">Başlat</button></div>
+    <div class="sm mut" id="ytnote" style="display:none;margin-top:8px">YouTube: sohbet tekrarı varsa anlar sohbetten, yoksa ses seviyesinden bulunur (önce sorarım).</div>
+    <div class="row mt"><span class="sm mut">Hız</span><div class="seg" id="spd"><button data-f="0">Yavaş · bilgisayarı yormaz</button><button data-f="1">Hızlı · tam güç</button></div></div>
   </div>
-</section>
-
-<!-- ============ ONAY KUTUSU ============ -->
-<section id="v-inbox" hidden>
-  <div class="row" style="justify-content:space-between;margin-bottom:10px"><div><h1 style="font-size:26px">Onay kutusu</h1><div class="sm mut"><kbd>A</kbd> onayla · <kbd>R</kbd> reddet · <kbd>S</kbd> sonra · <kbd>J</kbd>/<kbd>K</kbd> gezin · <kbd>Boşluk</kbd> oynat</div></div>
-    <div class="row"><select id="cn"><option>3</option><option selected>5</option><option>8</option><option>10</option></select><button class="g" id="compile">Günün en iyi anları derlemesi</button></div></div>
-  <div id="ctab" class="tabs"></div><div id="cmsg" class="sm mut" style="margin-bottom:8px"></div>
-  <div id="inbox"></div>
+  <div id="drafts"></div>
+  <div id="ready"></div>
 </section>
 
 <!-- ============ PROJELER ============ -->
@@ -181,18 +134,18 @@ const MB=n=>(n/1e6).toFixed(n>1e8?0:1)+' MB';
 let project=null,P=null,S={},cur=null;           // open project name, manifest, per-clip UI state, clip open in editor
 
 // ---------------- gezinme
-const VIEWS=['new','inbox','projects','channels','settings'];
+const VIEWS=['home','adv'];
 function show(v){
-  if(!VIEWS.includes(v))v='new';
-  VIEWS.forEach(x=>{$('v-'+x).hidden=x!==v});
+  if(!VIEWS.includes(v))v='home';
+  $('v-home').hidden=v!=='home';['v-projects','v-channels','v-settings'].forEach(x=>$(x).hidden=v!=='adv');
   document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
   try{history.replaceState(null,'','#'+v)}catch(e){}
-  if(v==='inbox')loadInbox();if(v==='projects')listProjects();if(v==='channels')loadQueue();if(v==='settings')loadSettings();
+  if(v==='home')loadHome();if(v==='adv'){listProjects();loadQueue();loadSettings()}
 }
 document.querySelectorAll('#nav button').forEach(b=>b.onclick=()=>show(b.dataset.v));
 
 // ---------------- iş çubuğu (tüm sekmelerde görünür)
-const STAGES=[['info','Bilgi'],['chat','Sohbet'],['audio','Ses analizi'],['clips','Kesim'],['layout','Yerleşim'],['overlay','Bindirme'],['captions','Altyazı'],['voice','Yorum sesi'],['compile','Derleme']];
+const STAGES=[['info','Bilgi'],['chat','Sohbet'],['audio','Ses analizi'],['clips','Kesim'],['layout','Yerleşim'],['overlay','Bindirme'],['captions','Altyazı'],['voice','Yorum sesi'],['compile','Derleme'],['meta','Başlık']];
 let curTask=null;
 function showSteps(stage){const i=STAGES.findIndex(s=>s[0]===stage);$('steps').innerHTML=STAGES.map((s,k)=>`<span class="${k<i?'done':k===i?'on':''}">${s[1]}</span>`).join('')}
 async function poll(tid,on){for(;;){const j=await (await api('/api/tasks/'+tid)).json();on&&on(j);if(j.status!=='running')return j;await new Promise(r=>setTimeout(r,1000))}}
@@ -219,60 +172,57 @@ async function startTask(url,method,body,title){
   return follow((await r.json()).id,title);
 }
 
-// ---------------- yeni proje
-let chatMode='smart',fmt='blur',lastBody=null;
-document.querySelectorAll('#modes .mode').forEach(m=>m.onclick=()=>{chatMode=m.dataset.v;document.querySelectorAll('#modes .mode').forEach(x=>x.classList.toggle('sel',x===m));saveForm()});
-document.querySelectorAll('#fmt button').forEach(b=>b.onclick=()=>{fmt=b.dataset.v;document.querySelectorAll('#fmt button').forEach(x=>x.classList.toggle('on',x===b));$('reshint').style.display=fmt!=='none'&&+$('res').value<1080?'block':'none';pvUpdate()});
-const FIELDS={font:'font',source:'source',n:'n',minlen:'minlen',maxlen:'maxlen',lead:'lead',res:'res',ch:'ch',ac:'ac',co:'co',sz:'sz',yp:'yp',stk:'stk',sync:'sync',vocab:'vocab'};
-const CHECKS={cap:'cap',plain:'plain',mask:'mask',snap:'snap',up:'up',szauto:'szauto',react:'react'};
-function getForm(){const f={chat:chatMode,fmt};for(const k in FIELDS)f[k]=$(FIELDS[k]).value;for(const k in CHECKS)f[k]=$(CHECKS[k]).checked;return f}
-function setForm(f){
-  for(const k in FIELDS)if(f[k]!==undefined)$(FIELDS[k]).value=f[k];
-  for(const k in CHECKS)if(f[k]!==undefined)$(CHECKS[k]).checked=f[k];
-  if(f.chat){chatMode=f.chat==='fast'?'smart':f.chat;document.querySelectorAll('#modes .mode').forEach(x=>x.classList.toggle('sel',x.dataset.v===chatMode))}
-  if(f.fmt){fmt=f.fmt;document.querySelectorAll('#fmt button').forEach(x=>x.classList.toggle('on',x.dataset.v===fmt))}
-  syncUi();
-}
-const BUILTIN={'Yatay klasik':{fmt:'none',sz:0.052,szauto:true,yp:0.72,ch:'3'},'Shorts (büyük yazı)':{fmt:'blur',szauto:false,sz:0.085,yp:0.62,ch:'2',stk:1.3,minlen:20,maxlen:45}};
-const presets=()=>({...BUILTIN,...lget('cc_presets',{})});
-function fillPresets(sel){$('preset').innerHTML='<option value="">— ön ayar —</option>'+Object.keys(presets()).map(n=>`<option ${n===sel?'selected':''}>${esc(n)}</option>`).join('')}
-$('preset').onchange=()=>{const p=presets()[$('preset').value];if(p){setForm({...getForm(),...p});pvUpdate()}};
-$('psave').onclick=()=>{const n=prompt('Ön ayar adı?');if(!n)return;const a=lget('cc_presets',{});a[n]=getForm();lset('cc_presets',a);fillPresets(n)};
-$('pdel').onclick=()=>{const n=$('preset').value,a=lget('cc_presets',{});if(a[n]){delete a[n];lset('cc_presets',a);fillPresets()}else alert('Yalnız kendi kaydettiğin ön ayarlar silinebilir.')};
-const saveForm=()=>lset('cc_form2',getForm());
-function syncUi(){$('sz').disabled=$('szauto').checked;$('syncv').textContent=(+$('sync').value).toFixed(2)+' sn';$('reshint').style.display=fmt!=='none'&&+$('res').value<1080?'block':'none'}
-function styleFromForm(){const a=$('szauto').checked;return{font:$('font').value,size:a?null:+$('sz').value,ypos:a&&fmt==='none'?null:+$('yp').value,chunk:+$('ch').value,active:$('ac').value,color:$('co').value,stroke:+$('stk').value,upper:$('up').checked,mask:$('mask').checked,sync:+$('sync').value}}
-let pvT=null;
-function pvUpdate(){syncUi();saveForm();clearTimeout(pvT);pvT=setTimeout(async()=>{const r=await api('/api/preview-style','POST',{style:styleFromForm(),portrait:fmt!=='none',text:'bu bir örnek altyazı metni'});if(r.ok){$('pv').src=URL.createObjectURL(await r.blob());$('pv').style.maxWidth=fmt!=='none'?'240px':'100%'}},200)}
-['font','sz','yp','ch','ac','co','stk','sync','up','mask','szauto'].forEach(k=>$(k).addEventListener('input',pvUpdate));
-['n','minlen','maxlen','lead','res','snap','cap','plain','source','vocab','react'].forEach(k=>$(k).addEventListener('change',()=>{saveForm();syncUi()}));
+// ---------------- klipler (ana ekran): link -> taslaklar -> seç -> üret
+let drafts=[],ready=[],picked=new Set(),lastUrl=null;
+const dk=d=>d.project+'/'+d.i;
 $('url').addEventListener('input',()=>{$('ytnote').style.display=/youtube\.com|youtu\.be/.test($('url').value)?'block':'none'});
 $('url').addEventListener('keydown',e=>{if(e.key==='Enter')$('go').click()});
-
-$('go').onclick=async()=>{
-  const url=$('url').value.trim();if(!url){$('url').focus();return}
-  const at=$('at').value.split(',').map(s=>s.trim()).filter(Boolean);
-  lastBody={url,n:+$('n').value,captions:$('cap').checked,keep_plain:$('plain').checked||!$('cap').checked,font:$('font').value,mask:$('mask').checked,layout:fmt,
-    source:chatMode==='audio'?'audio':$('source').value,at,snap:$('snap').checked,vocab:$('vocab').value.trim(),full_chat:chatMode==='full',style:styleFromForm(),
-    min_len:+$('minlen').value,max_len:+$('maxlen').value,lead:+$('lead').value,max_height:+$('res').value,reactions:$('react').checked};
-  await runJob(lastBody);
-};
+$('go').onclick=()=>{const url=$('url').value.trim();if(!url){$('url').focus();return}runJob({url,n:0,drafts:20,captions:true,keep_plain:false,layout:'face',max_height:720})};
 async function runJob(body){
-  $('go').disabled=true;
+  lastUrl=body;$('go').disabled=true;
   const r=await api('/api/jobs','POST',body);
   if(!r.ok){alert('İstek reddedildi');$('go').disabled=false;return}
-  const j=await follow((await r.json()).id,'Klipler hazırlanıyor');
+  const j=await follow((await r.json()).id,'Anlar bulunuyor ve önizlemeler indiriliyor');
   $('go').disabled=false;
-  if(j.status==='done'){await openProject(j.result.dir)}
+  if(j.status==='done'){$('url').value='';await loadHome();$('drafts').scrollIntoView({behavior:'smooth'})}
   else if(j.code==='confirm_audio'){
     $('jmsg').className='sm err';$('jmsg').innerHTML='';
     const t=document.createElement('span');t.textContent=j.error+' ';
     const b=document.createElement('button');b.className='b';b.textContent='Ses analiziyle devam et (~'+j.est_mb+' MB)';
-    b.onclick=()=>{$('jobbar').style.display='none';runJob({...lastBody,audio_ok:true})};
+    b.onclick=()=>{$('jobbar').style.display='none';runJob({...lastUrl,audio_ok:true})};
     $('jmsg').append(t,b);
   }
 }
+function showSpeed(fast){document.querySelectorAll('#spd button').forEach(b=>b.classList.toggle('on',(b.dataset.f==='1')===!!fast))}
+document.querySelectorAll('#spd button').forEach(b=>b.onclick=async()=>{const f=b.dataset.f==='1';showSpeed(f);await api('/api/settings','PUT',{fast:f})});
+async function loadHome(){
+  try{showSpeed((await (await api('/api/settings')).json()).fast)}catch(e){}
+  try{drafts=await (await api('/api/drafts')).json();
+    ready=[...await (await api('/api/inbox?status=new')).json(),...await (await api('/api/inbox?status=approved')).json()];
+    picked=new Set([...picked].filter(k=>drafts.some(d=>dk(d)===k)));renderHome()}catch(e){}
+}
+const refreshCount=()=>{};
+function renderHome(){
+  $('drafts').innerHTML=drafts.length?`<div class="pickbar"><div><b>Önizlemeler</b> <span class="sm mut">· beğendiklerini seç</span></div><div class="row"><span class="sm mut" id="pn"></span><button class="b" id="mk">Seçilenleri üret</button></div></div><div class="dgrid">`+drafts.map(d=>`<div class="dc ${picked.has(dk(d))?'sel':''}"><video controls preload="metadata" muted playsinline data-a="${d.a}" data-b="${d.b}" src="${d.video}#t=${d.a},${d.b}"></video><div class="in"><span class="sm mut">${d.length} sn · ${hms(d.at)}</span><span class="row"><button class="g" data-x="${esc(dk(d))}" title="Bu önizlemeyi sil">✗</button><button class="${picked.has(dk(d))?'b':'g'}" data-p="${esc(dk(d))}">${picked.has(dk(d))?'✓ Seçildi':'Seç'}</button></span></div></div>`).join('')+'</div>':'';
+  if(drafts.length){
+    $('drafts').querySelectorAll('video').forEach(v=>{const a=+v.dataset.a,b=+v.dataset.b;v.addEventListener('timeupdate',()=>{if(v.currentTime>=b){v.pause();v.currentTime=a}});v.addEventListener('play',()=>{if(v.currentTime<a||v.currentTime>=b)v.currentTime=a;v.muted=false})});
+    $('drafts').querySelectorAll('[data-p]').forEach(b=>b.onclick=()=>{const k=b.dataset.p;picked.has(k)?picked.delete(k):picked.add(k);const on=picked.has(k);b.className=on?'b':'g';b.textContent=on?'✓ Seçildi':'Seç';b.closest('.dc').classList.toggle('sel',on);$('mk').disabled=!picked.size;$('pn').textContent=picked.size?picked.size+' seçili':''});
+    $('drafts').querySelectorAll('[data-x]').forEach(b=>b.onclick=async()=>{const [pr,i]=b.dataset.x.split('/');await api(`/api/projects/${pr}/clips/${i}`,'DELETE');picked.delete(b.dataset.x);loadHome()});
+    $('mk').disabled=!picked.size;$('pn').textContent=picked.size?picked.size+' seçili':'';
+    $('mk').onclick=async()=>{const picks=[...picked].map(k=>{const [project,i]=k.split('/');return{project,i:+i}});picked.clear();await startTask('/api/render','POST',{picks},'Klipler üretiliyor');loadHome()};
+  }
+  $('ready').innerHTML=ready.length?'<h3>Hazır klipler</h3><div class="clips">'+ready.map(r=>`<div class="clipc" data-k="${esc(r.project+'/'+r.i)}"><video controls preload="metadata" src="${r.video}"></video><div class="in">
+    <input type="text" class="rt" value="${esc(r.title)}" aria-label="Başlık">
+    <div class="row" style="justify-content:space-between"><span class="sm mut">${r.length} sn${r.ai_score?` · AI ${r.ai_score}/10`:''}</span>${r.status==='approved'?'<span class="badge ok">✓ hazır paket</span>':`<button class="b" data-ok="${esc(r.project+'/'+r.i)}">Kaydet</button>`}</div>
+    <div class="row" style="justify-content:space-between"><a class="sm" href="${r.video}" download>indir</a><span class="row"><button class="g" data-ed="${esc(r.project)}">Düzenle</button><button class="d" data-del="${esc(r.project+'/'+r.i)}">Sil</button></span></div></div></div>`).join('')+'</div>':'';
+  $('ready').querySelectorAll('[data-ok]').forEach(b=>b.onclick=async()=>{const k=b.dataset.ok,[pr,i]=k.split('/'),t=b.closest('.clipc').querySelector('.rt').value;
+    b.disabled=true;await api(`/api/projects/${pr}/clips/${i}/review`,'POST',{status:'approved',title:t});loadHome()});
+  $('ready').querySelectorAll('.rt').forEach(inp=>inp.addEventListener('change',()=>{const [pr,i]=inp.closest('.clipc').dataset.k.split('/');api(`/api/projects/${pr}/clips/${i}/review`,'POST',{title:inp.value})}));
+  $('ready').querySelectorAll('[data-ed]').forEach(b=>b.onclick=()=>openProject(b.dataset.ed));
+  $('ready').querySelectorAll('[data-del]').forEach(b=>b.onclick=async()=>{if(!confirm('Bu klip silinsin mi?'))return;const [pr,i]=b.dataset.del.split('/');await api(`/api/projects/${pr}/clips/${i}`,'DELETE');loadHome()});
+}
 async function reattach(){try{const l=await (await api('/api/tasks')).json();const r=l.find(x=>x.status==='running');if(r){const j=await follow(r.id,r.label?('Çalışıyor: '+r.label.slice(0,60)):'Çalışıyor…');if(j.status==='done'&&j.result&&j.result.dir&&!String(j.result.dir).includes('/'))openProject(j.result.dir)}}catch(e){}}
+
 
 // ---------------- projeler
 async function listProjects(){
@@ -284,17 +234,17 @@ async function delProject(n,keep){
   if(!confirm('Bu projenin tüm klipleri ve dosyaları diskten silinsin mi? Geri alınamaz.'))return;
   await api('/api/projects/'+n,'DELETE');if(project===n){$('proj').innerHTML='';project=null}listProjects()}
 async function openProject(name){
-  show('projects');project=name;P=await (await api('/api/projects/'+name)).json();
+  show('adv');project=name;P=await (await api('/api/projects/'+name)).json();
   P.clips.forEach(c=>S[c.i]=S[c.i]||{});renderProject();$('proj').scrollIntoView({behavior:'smooth'});
 }
 const vidOf=c=>c.voiced||c.captioned||c.plain||c.src;
 function renderProject(){
   const f=p=>'/files/'+project+'/'+p+'?v='+(P._v||0);
-  const best=Math.max(1,...P.clips.map(x=>x.score||0));
+  const best=Math.max(1,...P.clips.map(x=>x.score||0)),R=P.clips.filter(c=>c.status!=='draft');
   $('proj').innerHTML=`<div class="card"><div class="row" style="justify-content:space-between"><div><h2 style="margin:0">${esc(P.title)}</h2><div class="sm mut">${esc(P.slug)} · kaynak: ${esc(P.source)} · ${hms(P.duration)}</div></div>
     <div class="row"><button class="g" id="more" ${P.unused?'':'disabled'}>Sıradaki en iyi anı ekle (${P.unused||0})</button><button class="g" id="keepb">${P.keep?'🔒 Korumalı':'Koru'}</button></div></div>
     <div class="row mt"><input id="ms" type="text" placeholder="başlangıç 1:44:50" style="width:160px"><input id="me" type="text" placeholder="bitiş 1:45:40" style="width:160px"><button class="g" id="madd">Elle klip ekle</button></div></div>
-    <div class="clips">`+P.clips.map(c=>{
+    <div class="clips">`+R.map(c=>{
       const wide=c.layout.mode==='none';
       return `<div class="clipc ${wide?'wide':''}"><video controls preload="metadata" src="${f(vidOf(c))}"></video><div class="in">
         <div class="row" style="justify-content:space-between"><span><span class="badge">${c.score>0?'#'+c.rank:'elle'}</span> <span class="sm mut">${Math.round(c.end-c.start)} sn · ${hms(c.start)}</span></span>${c.status==='approved'?'<span class="badge ok">onaylı</span>':c.status==='rejected'?'<span class="badge no">reddedildi</span>':''}</div>
@@ -392,63 +342,6 @@ function drawCanvases(c){
 function buildCells(c){const s=S[c.i],L=s.layout,box=$('cells');if(!box)return;
   box.innerHTML=L.cells.map((cell,n)=>`<div class="row mt"><label class="row"><input type="radio" name="sel" ${n===s.sel?'checked':''} onchange="S[cur].sel=${n};drawCanvases(P.clips.find(k=>k.i===cur))"> ${L.mode==='stack'?(n?'Alt':'Üst'):'Pencere'} yakınlık</label><input type="range" min="1" max="4" step="0.05" value="${cell.zoom}" style="flex:1" oninput="S[cur].layout.cells[${n}].zoom=+this.value;drawCanvases(P.clips.find(k=>k.i===cur))"></div>`).join('')}
 
-// ---------------- onay kutusu
-let tab='new',rows=[],ci=0,aiOn=false;
-const TABS=[['new','Bekleyenler'],['approved','Onaylananlar'],['rejected','Reddedilenler']];
-async function refreshCount(){try{const a=await (await api('/api/inbox?status=new')).json();const n=a.filter(r=>!r.dup_of).length;const e=$('ninbox');e.textContent=n;e.style.display=n?'inline-block':'none'}catch(e){}}
-async function loadInbox(){
-  rows=await (await api('/api/inbox?status='+tab)).json();ci=Math.min(ci,Math.max(0,rows.length-1));
-  const all=await (await api('/api/inbox?status=all')).json(),cnt={};all.forEach(r=>cnt[r.status]=(cnt[r.status]||0)+1);
-  $('ctab').innerHTML='';TABS.forEach(([k,l])=>{const b=document.createElement('button');b.textContent=`${l} (${cnt[k]||0})`;b.className=k===tab?'on':'';b.onclick=()=>{tab=k;ci=0;loadInbox()};$('ctab').append(b)});
-  try{aiOn=(await (await api('/api/titles-available')).json()).available}catch(e){}
-  renderInbox();refreshCount();
-}
-function renderInbox(){
-  const v=$('inbox');
-  if(!rows.length){v.innerHTML='<div class="card empty">Bu sekmede klip yok. Yeni klipler “Yeni” sekmesinden ya da kuyruktan gelir.</div>';return}
-  const r=rows[ci],best=Math.max(...rows.map(x=>x.score))||1;
-  const bulk=tab==='new'&&rows.filter(x=>!x.dup_of).length>1?`<div class="row" style="margin-bottom:10px"><button class="g" id="top3">★ En iyi 3'ü onayla</button><span class="sm mut">Onaylananlar hemen hazır pakete (Shorts) aktarılır.</span></div>`:'';
-  v.innerHTML=bulk+`<div class="card"><div class="sm mut" style="margin-bottom:10px">${ci+1} / ${rows.length} · ${esc(r.slug)} · ${esc(r.source_title)}</div>
-  <div class="two" style="grid-template-columns:minmax(0,300px) minmax(0,1fr)"><div><video id="vid" src="${r.video}" controls playsinline style="width:100%;max-height:540px;border-radius:12px;background:#000"></video></div>
-  <div><div class="row"><span class="badge">skor ${r.score}</span>${r.ai_score?`<span class="badge ${r.ai_score>=7?'':'w'}" title="${esc(r.ai_reason)}">AI ${r.ai_score}/10</span>`:''}<span class="sm mut">${r.length} sn · yayında ${hms(r.start)}</span>${r.reactions?'<span class="badge w">sohbet tepkisi</span>':''}${r.voice?'<span class="badge w">yorum</span>':''}${r.dup_of?`<span class="badge no" title="Aynı an/benzer konuşma: ${esc(r.dup_of)}">benzer klip</span>`:''}</div>
-  <div class="sc" style="margin:8px 0 ${r.ai_reason?'4px':'12px'}"><i style="width:${Math.round(100*r.score/best)}%"></i></div>${r.ai_reason?`<div class="sm mut" style="margin-bottom:10px">${esc(r.ai_reason)}</div>`:''}
-  <div class="row" style="justify-content:space-between"><span class="sm mut">Başlık</span>${aiOn?'<button class="g" id="ai" style="padding:3px 10px">✨ Yeniden öner</button>':''}</div>
-  <input type="text" id="t" value="${esc(r.title)}"><div id="aic" class="chips" style="margin-top:6px">${(r.title_options||[]).filter(t=>t!==r.title).map(t=>`<span style="cursor:pointer" data-t="${esc(t)}">${esc(t)}</span>`).join('')}</div>
-  <div class="sm mut" style="margin:10px 0 4px">Açıklama (kaynak bağlantısı otomatik eklenir)</div><textarea id="d">${esc(r.description)}</textarea>
-  <div class="sm mut" style="margin:10px 0 4px">Etiketler (virgülle)</div><input type="text" id="g" value="${esc(r.tags.join(', '))}">
-  <div class="row mt"><button class="b okb" id="ba">Onayla (A)</button><button class="b nob" id="br">Reddet (R)</button><button class="g" id="bs">Sonra (S)</button>
-  ${r.status==='approved'?'<select id="pf"><option value="shorts">YouTube Shorts</option><option value="reels">Instagram Reels</option><option value="tiktok">TikTok</option></select><button class="b" id="be">Hazır pakete aktar</button>':''}</div>
-  <div id="res" class="sm mut" style="margin-top:10px">${r.exported?'Aktarıldı: '+esc(r.exported.dir):''}</div></div></div></div>`;
-  ['t','d','g'].forEach(k=>$(k).addEventListener('change',saveRow));
-  $('aic').querySelectorAll('[data-t]').forEach(e=>e.onclick=()=>{$('t').value=e.dataset.t;saveRow()});
-  if($('top3'))$('top3').onclick=async()=>{const pick=rows.filter(x=>!x.dup_of).slice(0,3);if(!confirm(`${pick.length} klip onaylansın ve hazır pakete aktarılsın mı?\n\n`+pick.map(x=>'• '+x.title).join('\n')))return;
-    for(const x of pick)await api(`/api/projects/${x.project}/clips/${x.i}/review`,'POST',{status:'approved'});ci=0;loadInbox()};
-  $('ba').onclick=()=>decide('approved');$('br').onclick=()=>decide('rejected');$('bs').onclick=()=>go(1);
-  if($('be'))$('be').onclick=doExport;if($('ai'))$('ai').onclick=aiTitles;
-}
-async function saveRow(){const r=rows[ci];if(!r)return;r.title=$('t').value;r.description=$('d').value;r.tags=$('g').value.split(',').map(x=>x.trim()).filter(Boolean);
-  await api(`/api/projects/${r.project}/clips/${r.i}/review`,'POST',{title:r.title,description:r.description,tags:r.tags})}
-async function decide(st){const r=rows[ci];if(!r)return;await saveRow();await api(`/api/projects/${r.project}/clips/${r.i}/review`,'POST',{status:st});await loadInbox()}
-function go(d){if(!rows.length)return;ci=(ci+d+rows.length)%rows.length;renderInbox()}
-async function doExport(){const r=rows[ci];$('res').textContent='Hazırlanıyor…';await saveRow();
-  const x=await api(`/api/projects/${r.project}/clips/${r.i}/export`,'POST',{platform:$('pf').value}),j=await x.json();
-  if(!x.ok){$('res').innerHTML='<span class="err">'+esc(j.detail||'Hata')+'</span>';return}
-  $('res').innerHTML='Hazır: <b>'+esc(j.dir)+'</b>'+(j.warnings.length?'<div class="err">'+j.warnings.map(esc).join('<br>')+'</div>':'')}
-async function aiTitles(){const r=rows[ci];$('aic').innerHTML='<span>Düşünüyor…</span>';
-  const x=await api(`/api/projects/${r.project}/clips/${r.i}/titles`,'POST'),j=await x.json();
-  if(!x.ok){$('aic').innerHTML='<span class="err" style="border:0">'+esc(j.detail||'Hata')+'</span>';return}
-  $('aic').innerHTML='';j.titles.forEach(t=>{const s=document.createElement('span');s.textContent=t;s.style.cursor='pointer';s.onclick=()=>{$('t').value=t;saveRow()};$('aic').append(s)});
-  if(j.description&&confirm('Açıklama ve etiket önerisi de uygulansın mı?\n\n'+j.description)){const keep=r.description.split('\n\n').slice(1).join('\n\n');$('d').value=j.description+(keep?'\n\n'+keep:'');$('g').value=j.tags.join(', ');saveRow()}}
-$('compile').onclick=async()=>{$('cmsg').textContent='';const j=await startTask('/api/compile','POST',{n:+$('cn').value,status:'approved'},'Derleme hazırlanıyor');
-  if(j&&j.status==='done')$('cmsg').innerHTML='Derleme hazır: <b>'+esc(j.result.path)+'</b> (kaynak listesi yanında .txt)';else if(j)$('cmsg').innerHTML='<span class="err">'+esc(j.error||'')+'</span>'};
-document.addEventListener('keydown',e=>{
-  if($('v-inbox').hidden||['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName)||$('ed').open)return;
-  const k=e.key.toLowerCase();
-  if(k==='a'&&tab==='new')decide('approved');else if(k==='r'&&tab==='new')decide('rejected');
-  else if(k==='s'||k==='j')go(1);else if(k==='k')go(-1);
-  else if(k===' '){e.preventDefault();const v=$('vid');if(v)v.paused?v.play():v.pause()}
-});
-
 // ---------------- kanallar + kuyruk
 async function loadQueue(){
   try{
@@ -487,16 +380,7 @@ $('cprev').onclick=async()=>{const r=await (await api('/api/cleanup','POST',{day
 $('capply').onclick=async()=>{if(!planned||!confirm(`${MB(planned.bytes)} silinsin mi? (yalnız ham kesit/kare/ses ve reddedilenler)`))return;const r=await (await api('/api/cleanup','POST',{days:+$('cdays').value,apply:true})).json();$('cmsg2').textContent=`${MB(r.freed)} boşaltıldı`;$('capply').disabled=true;loadSettings()};
 $('logload').onclick=async()=>{const r=await (await api('/api/log?n=400')).json();const e=$('logtxt2');e.style.display='block';e.textContent=r.text;$('logfile').textContent=r.file;e.scrollTop=1e9};
 
-// ---------------- ilk kurulum
-async function checkSetup(){try{const [c,ch]=await Promise.all([api('/api/settings').then(r=>r.json()),api('/api/channels').then(r=>r.json())]);
-  $('setup').hidden=!!(ch.length&&c.auto_watch)}catch(e){}}
-$('s_go').onclick=async()=>{const m=$('s_msg');m.textContent='';m.className='sm mut';
-  const u=$('s_ch').value.trim();if($('s_key').value.trim())await putSet({gemini_key:$('s_key').value});
-  if(u){const lay=$('s_lay').value,r=await api('/api/channels','POST',{url:u,layout:lay,max_height:lay==='none'?720:1080});
-    if(!r.ok){const d=(await r.json()).detail||'Hata';if(!/zaten/.test(d)){m.className='sm err';m.textContent=d;return}}}
-  await putSet({auto_watch:true});$('s_key').value='';m.textContent='Hazır. İlk tarama birazdan başlar; biten klipler Onay kutusuna düşer.';checkSetup();loadQueue&&loadQueue()};
-
 // ---------------- başlangıç
-checkSetup();fillPresets();setForm(lget('cc_form2',{}));pvUpdate();refreshCount();reattach();
-{const q=new URLSearchParams(location.search).get('p'),h=location.hash.slice(1);if(q)openProject(q);else show(VIEWS.includes(h)?h:'new')}
+reattach();
+{const q=new URLSearchParams(location.search).get('p'),h=location.hash.slice(1);if(q)openProject(q);else show(VIEWS.includes(h)?h:'home')}
 </script></body></html>

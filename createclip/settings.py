@@ -4,7 +4,7 @@ import json
 import os
 from pathlib import Path
 
-DEFAULTS = {"gemini_key": "", "auto_watch": False, "watch_hours": 3.0}
+DEFAULTS = {"gemini_key": "", "auto_watch": False, "watch_hours": 3.0, "fast": False}
 _root: Path | None = None
 
 
@@ -55,4 +55,4 @@ def public() -> dict:
     d = load()
     k = d.get("gemini_key") or ""
     return {"gemini_set": bool(k or os.environ.get("GEMINI_API_KEY")), "gemini_hint": ("…" + k[-4:]) if len(k) > 8 else "",
-            "auto_watch": bool(d["auto_watch"]), "watch_hours": d["watch_hours"]}
+            "auto_watch": bool(d["auto_watch"]), "watch_hours": d["watch_hours"], "fast": bool(d["fast"])}

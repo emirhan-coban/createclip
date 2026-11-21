@@ -5,7 +5,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from . import ytdlp
+from . import encode, ytdlp
 from .log import run, run_ok
 
 PAD = 10.0  # seconds of extra footage kept around a clip so edits can nudge without re-downloading
@@ -35,6 +35,9 @@ def format_selector(h: int) -> str:
 
 
 def download_range(url: str, start: float, end: float, out: Path, max_height: int = 720) -> Path:
+    """Stream-copy the range (no re-encoding, so several can run in parallel). `--force-keyframes-at-cuts` is
+    deliberately not used: it re-encodes the whole section. Measured on YouTube at off-grid starts: the copy is
+    time-aligned with the re-encoded one (audio lag 0.0005 s) and 4 parallel downloads took 65 s instead of 238 s."""
     out.parent.mkdir(parents=True, exist_ok=True)
     for old in out.parent.glob(out.stem + ".*"):
         old.unlink()
@@ -46,7 +49,7 @@ def download_range(url: str, start: float, end: float, out: Path, max_height: in
         try:
             p = run(
                 ytdlp.cmd("-q", "--socket-timeout", "30", "-f", format_selector(max_height),
-                 "--merge-output-format", "mp4", "--download-sections", f"*{hms(start)}-{hms(end)}", "--force-keyframes-at-cuts", "-o",
+                 "--merge-output-format", "mp4", "--download-sections", f"*{hms(start)}-{hms(end)}", "-o",
                  str(out.with_suffix("")) + ".%(ext)s", url), f"indirme {hms(start)}-{hms(end)} (deneme {attempt + 1})", timeout=240)
         except subprocess.TimeoutExpired:
             err = "indirme zaman aşımına uğradı"
@@ -94,17 +97,17 @@ def trim_dead_air(a: float, b: float, sil, min_gap: float = 0.7, keep: float = 0
 def trim(raw: Path, a: float, b: float, out: Path, normalize: bool = True) -> Path:
     out.parent.mkdir(parents=True, exist_ok=True)
     cmd = ["ffmpeg", "-y", "-v", "error", "-ss", f"{a:.3f}", "-to", f"{b:.3f}", "-i", str(raw),
-           "-c:v", "libx264", "-crf", "18", "-preset", "veryfast", "-pix_fmt", "yuv420p"]
+           "-vf", encode.fps_filter(), *encode.video_args(crf=18, preset="superfast")]
     if normalize:
         cmd += ["-af", LOUDNORM, "-ar", "48000"]
     run_ok(cmd + ["-c:a", "aac", str(out)], "klip kırpma")
     return out
 
 
-def make_clip(url: str, start: float, end: float, raw: Path, out: Path, duration: float,
-              max_height: int = 720, snap_cuts: bool = True, min_len: float = 20, max_len: float = 75):
-    """Download [start-PAD, end+PAD], snap the cuts to pauses, trim into `out`.
-    Returns (final_start, final_end, raw_start, raw_end) in VOD seconds."""
+def fetch_raw(url: str, start: float, end: float, raw: Path, duration: float, max_height: int = 720,
+              snap_cuts: bool = True, min_len: float = 20, max_len: float = 75):
+    """Download [start-PAD, end+PAD] (no encoding) and snap the cut points to speech pauses.
+    Returns (final_start, final_end, raw_start, raw_end) in VOD seconds; the clip is not trimmed yet."""
     raw_start = max(0.0, start - PAD)
     raw_end = min(duration, end + PAD)
     r = download_range(url, raw_start, raw_end, raw, max_height)
@@ -118,5 +121,12 @@ def make_clip(url: str, start: float, end: float, raw: Path, out: Path, duration
         a3, b3 = trim_dead_air(a, b, sil)
         if b3 - a3 >= min_len:
             a, b = a3, b3
-    trim(r, a, b, out)
     return raw_start + a, raw_start + b, raw_start, raw_end
+
+
+def make_clip(url: str, start: float, end: float, raw: Path, out: Path, duration: float,
+              max_height: int = 720, snap_cuts: bool = True, min_len: float = 20, max_len: float = 75):
+    """fetch_raw + trim into `out`. Returns (final_start, final_end, raw_start, raw_end) in VOD seconds."""
+    s, e, rs, re_ = fetch_raw(url, start, end, raw, duration, max_height, snap_cuts, min_len, max_len)
+    trim(raw, s - rs, e - rs, out)
+    return s, e, rs, re_

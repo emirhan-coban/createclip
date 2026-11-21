@@ -8,6 +8,7 @@ Cell coordinates are normalised (0-1) centres; zoom >= 1."""
 import subprocess
 from pathlib import Path
 
+from . import encode
 from .log import run_ok
 
 OUT_W, OUT_H = 1080, 1920
@@ -56,11 +57,18 @@ def filter_graph(layout: dict, W: int, H: int) -> str:
     raise ValueError(f"Bilinmeyen yerleşim: {mode}")
 
 
+def timed_graph(layout: dict, W: int, H: int, out_label: str = "v") -> str:
+    """filter_graph with the frame rate capped (OUT_FPS) before anything else; mode "none" is just the cap."""
+    g = filter_graph(layout, W, H) if layout.get("mode", "none") != "none" else "[0:v]null[v]"
+    g = g.replace("[0:v]", f"[0:v]{encode.fps_filter()}[f];[f]", 1)
+    return g if out_label == "v" else g.replace("[v]", f"[{out_label}]")
+
+
 def render(src: Path, layout: dict, out: Path, W: int, H: int) -> Path:
     out.parent.mkdir(parents=True, exist_ok=True)
     run_ok(["ffmpeg", "-y", "-v", "error", "-i", str(src), "-filter_complex",
-            filter_graph(layout, W, H), "-map", "[v]", "-map", "0:a?", "-c:v", "libx264", "-crf", "20",
-            "-pix_fmt", "yuv420p", "-c:a", "aac", str(out)], "9:16 yerleşim")
+            timed_graph(layout, W, H), "-map", "[v]", "-map", "0:a?", *encode.video_args(), "-c:a", "aac", str(out)],
+           "9:16 yerleşim")
     return out
 
 

@@ -171,3 +171,12 @@ def test_cli_parser_builds(capsys):
         with pytest.raises(SystemExit) as e:
             main(args)
         assert e.value.code == 0
+
+
+def test_start_at_skips_opening_and_baseline():
+    # crowded opening burst at 200 s, then a quieter stream with one real burst at 1500 s
+    base = [{"t": t, "u": f"b{t}", "c": "x"} for t in range(0, 3600, 20)]
+    msgs = base + _msgs(200, 80) + _msgs(1500, 30)
+    assert abs(peaks.find_peaks(msgs, 3600, n=1)[0].time - 200) <= 20
+    p = peaks.find_peaks(msgs, 3600, n=1, skip_start=600)[0]
+    assert abs(p.time - 1500) <= 20 and p.start >= 600

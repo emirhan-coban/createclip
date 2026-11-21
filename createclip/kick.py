@@ -251,27 +251,28 @@ class Chat:
                 fut.result()
 
     # ------------------------------------------------------------------ modes
-    def full(self):
+    def full(self, start: float = 0.0):
         seg = max(60.0, self.vod.duration / 60)
-        ranges, a = [], 0.0
+        ranges, a = [], float(start)
         while a < self.vod.duration:
             ranges.append((a, min(a + seg, self.vod.duration)))
             a += seg
         self.crawl(ranges, "tam", adaptive=True)
         return ChatData(sorted(self.msgs, key=lambda m: m["t"]), self.cov, True, [])
 
-    def smart(self, n_regions: int | None = None):
+    def smart(self, n_regions: int | None = None, start: float = 0.0):
         """Stage 1: one 5 s window out of every COARSE_EVERY. Stage 2: crawl densely only around the
         strongest candidates. Peaks are decided by the dense data, so the top moments match a full crawl
         (measured on real VODs: top-10 within one moment of a full crawl) at about a third of the requests."""
         from . import peaks
         dur = self.vod.duration
         if n_regions is None:      # tuned on a real 6 h VOD (59k messages): ~1/3 of the requests, top-10 intact
-            n_regions = max(14, min(60, int(0.3 * dur / (2 * REGION_PAD))))
-        starts = [i * WIN for i in range(0, int(dur // WIN) + 1, COARSE_EVERY)]
+            n_regions = max(14, min(60, int(0.3 * (dur - start) / (2 * REGION_PAD))))
+        first = int(start // WIN)
+        starts = [i * WIN for i in range(first, int(dur // WIN) + 1, COARSE_EVERY)]
         self.crawl([(s, s + WIN) for s in starts if s < dur], "örnekleme", adaptive=False)
-        coarse = peaks.coarse_candidates(self.msgs, starts, dur, n_regions)
-        ranges = [(max(0.0, c - REGION_PAD), min(dur, c + REGION_PAD)) for c in coarse]
+        coarse = peaks.coarse_candidates(self.msgs, starts, dur, n_regions, skip_start=max(120, start))
+        ranges = [(max(float(start), c - REGION_PAD), min(dur, c + REGION_PAD)) for c in coarse]
         self.crawl(ranges, "yoğun bölgeler", adaptive=True)
         return ChatData(sorted(self.msgs, key=lambda m: m["t"]), self.cov, False, starts)
 
@@ -279,11 +280,13 @@ class Chat:
         self.fh.close()
 
 
-def fetch_chat(vod: Vod, cache_dir: Path, progress=None, mode: str = "smart", workers: int = WORKERS) -> ChatData:
-    """mode: "smart" (default, fast) or "full" (every window, complete). Resumable; cache shared by both."""
+def fetch_chat(vod: Vod, cache_dir: Path, progress=None, mode: str = "smart", workers: int = WORKERS,
+               start: float = 0.0) -> ChatData:
+    """mode: "smart" (default, fast) or "full" (every window, complete). Resumable; cache shared by both.
+    start: seconds from the VOD start; nothing before it is requested (skips the crowded opening)."""
     c = Chat(vod, cache_dir, progress, workers)
     try:
-        return c.full() if mode == "full" else c.smart()
+        return c.full(start) if mode == "full" else c.smart(start=start)
     finally:
         c.close()
 

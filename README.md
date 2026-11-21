@@ -98,7 +98,7 @@ zamanları 5 klipte ses başlangıçlarıyla karşılaştırıldı: medyan sapma
 
 ## Geliştirme
 ```bash
-./.venv/bin/python -m pytest -q       # 65 test
+./.venv/bin/python -m pytest -q       # 84 test
 ```
 Dosyalar: `kick.py` (VOD + sohbet), `peaks.py`, `audio_peaks.py`, `clipper.py`, `transcribe.py`, `captions.py`, `layout.py`,
 `youtube.py`, `sources.py` (YouTube + platform seçimi), `watch.py` (izleyici + kuyruk), `review.py` (onay kutusu + hazır paket), `ytdlp.py`, `log.py`, `pipeline.py` (iş akışı + düzenleme), `web/` (FastAPI + tek sayfa arayüz), `syncfix.py` (senkron ölçüm aracı).
@@ -159,6 +159,37 @@ Hiçbiri "politikaya uyar" garantisi değildir.
 
 Yapılmayanlar: otomatik YouTube/TikTok/Instagram yükleme (API'ler denetim gerektirir, "hazır paket" kullan) ve ek an sinyalleri
 (kahkaha/anahtar kelime): etiketli veri olmadan iyileşme ölçülemediği için eklenmedi.
+
+## Hız: önizle → seç → üret (ölçüldü)
+
+Eski akış her klibi sırayla baştan sona işliyordu (günlükten klip başına ≈ 3 dk: indirme 43 sn, yerleşim 63 sn, altyazı 40 sn, Whisper 23 sn,
+kırpma 9 sn; 20 klip ≈ 1 saat) ve aynı dakikayı 4 kez kodluyordu, her şey 60 fps / 1080×1920'ydi. Şimdi:
+
+1. **Önizleme:** en iyi 20 an aynı anda (6 paralel) **kodlamasız** indirilir; ana ekranda oynatılır. Seçilmeyenler hiç işlenmez.
+2. **Üret:** yalnız seçilenler: kırpma → Whisper (tek işçi) → **tek geçişte** 9:16 yerleşim + altyazı (30 fps, `veryfast`, altyazı yalnız
+   altyazı bandı kadar bir görselle); birkaç klip aynı anda ilerler.
+3. Kuyruk/izleyici (gece): en iyi 5 otomatik üretilir, 15 taslak sabaha önizleme olarak bekler.
+
+| Ölçüm (aynı 30 sn klip, yoğun makinede) | Süre |
+|---|---|
+| Eski zincir: trim + yerleşim + altyazı (60 fps, medium) | 282 sn |
+| Yeni: trim + tek geçiş (libx264 veryfast, 30 fps) | 37 sn |
+| Yeni, Apple donanım kodlayıcısı (`CREATECLIP_ENCODER=videotoolbox`) | 22 sn (dosya daha küçük; kalite göz kontrolüyle doğrulanmadı) |
+
+İndirme (YouTube, 40-65 sn'lik aralıklar): `--force-keyframes-at-cuts` kesiti yeniden kodlar; kaldırıldı. Kopya kesim zamanda hizalı
+çıktı (ses çapraz ilişkisiyle kayma 0,0005 sn) ve 4 paralel indirme 238 sn yerine 65 sn sürdü; 8 önizleme ≈ 117 sn (yoğun makine).
+**Uçtan uca (gerçek YouTube yayını, 8 klip, hepsi üretildi):** 8 önizleme 117 sn, 8 bitmiş dikey altyazılı klip toplam **744 sn**
+(≈ 93 sn/klip; eski akışta günlükteki 3 dk/klip ile ≈ 24 dk). Çıktı doğrulandı: 1080×1920, 30 fps, süre 45,0 sn, ses var, altyazı bandı ve oyun+yüz yerleşimi
+yerinde. Bu çalışma sırasında makinenin yük ortalaması 80-150'ydi (başka uygulamalar + 3 eşzamanlı kodlama), Whisper klip başına ~80 sn sürdü
+(boşta 15-23 sn); en yavaş aşama tek Whisper işçisi olduğundan boş makinede çok daha hızlı beklenir ama bu **ölçülmedi**.
+Asıl kazanç seçmeli akışta: 5 klip seçilince 8 yerine 5 klip üretilir.
+**Yavaş / Hızlı anahtarı** (ana ekranda, ayar anında geçerli): *Yavaş* (varsayılan) ağır araçları düşük öncelikte (`nice 10`), kodlamayı 4 çekirdekle,
+2 klip + 4 indirmeyle çalıştırır, bilgisayar başka işe kullanılabilir; *Hızlı* tam güç (3 klip, 6 indirme, tüm çekirdekler). `CREATECLIP_FAST=1` varsayılanı hızlı yapar. Aradaki süre farkı ölçülmedi.
+Rakamlar bu makinede, başka uygulamaların yükü altında (yük ortalaması 30-80) alındı; boştaki makinede mutlak süreler daha kısa olur.
+
+**Whisper turbo (`large-v3-turbo`) denendi, kullanılmıyor:** 6 gerçek Türkçe klipte 3-5 kat hızlıydı ama 2 klipte konuşmanın büyük kısmını
+atladı (large-v3'ün bulduğu kelimelerin %37 ve %44'ü; konuşma süresi 67 sn yerine 39 sn). Varsayılan large-v3 kaldı;
+`CREATECLIP_WHISPER_MODEL` ile değiştirilebilir. `scripts/bench.py` kodlama ölçümünü tekrarlar.
 
 ## Otomatik mod (Gemini ile)
 

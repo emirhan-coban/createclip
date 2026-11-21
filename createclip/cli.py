@@ -2,7 +2,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from . import cleanup as cleanupmod, compile as compilemod, doctor as doctormod, layout as layoutmod, log as logmod, pipeline, watch as watchmod
+from . import cleanup as cleanupmod, clipper, compile as compilemod, doctor as doctormod, layout as layoutmod, log as logmod, pipeline, watch as watchmod
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -21,7 +21,7 @@ def main(argv=None):
     r.add_argument("-n", type=int, default=5, help="klip sayısı")
     r.add_argument("--captions", action=argparse.BooleanOptionalAction, default=True,
                    help="altyazılı sürüm üret (--no-captions: üretme)")
-    r.add_argument("--plain", action=argparse.BooleanOptionalAction, default=True,
+    r.add_argument("--plain", action=argparse.BooleanOptionalAction, default=False,
                    help="altyazısız sürümü de tut")
     r.add_argument("--font", choices=["montserrat", "poppins", "gabarito"], default="montserrat")
     r.add_argument("--mask-profanity", action="store_true", help="küfürleri yıldızla")
@@ -35,6 +35,8 @@ def main(argv=None):
                    help="elle klip: '1:44:50' (45 sn) veya '1:44:50-1:45:40'; birden fazla verilebilir")
     r.add_argument("--full-chat", action="store_true",
                    help="sohbeti eksiksiz indir (varsayılan: akıllı mod, seyrek örnekleme + yoğun bölgeler)")
+    r.add_argument("--start", default="0", metavar="ZAMAN",
+                   help="bu zamandan öncesini yok say, sohbet de buradan indirilir (örn. 10:00 ya da 0:08:00)")
     r.add_argument("--vocab", default="", help="isteğe bağlı özel kelimeler (örn. 'Berk, Derbeder'); "
                    "kısa tut, uzun liste konuşmanın atlanmasına yol açabilir")
     r.add_argument("--size", type=float, help="altyazı boyutu (genişliğin oranı, örn. 0.06)")
@@ -184,7 +186,7 @@ def main(argv=None):
                                     "chunk": a.chunk, "sync": a.sync},
                              min_len=a.min_len, max_len=a.max_len, max_height=a.max_height,
                              layout={"mode": a.layout, "cells": layoutmod.default_cells(a.layout)},
-                             snap=not a.no_snap, source=a.source, at=a.at, vocab=a.vocab, reactions=a.reactions, chat_mode="full" if a.full_chat else "smart")
+                             snap=not a.no_snap, source=a.source, at=a.at, start_at=clipper.parse_time(a.start), vocab=a.vocab, reactions=a.reactions, chat_mode="full" if a.full_chat else "smart")
         try:
             try:
                 m = pipeline.run(a.url, a.out, o, _progress)

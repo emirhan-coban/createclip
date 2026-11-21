@@ -6,6 +6,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
+from . import encode
 from .log import run_ok
 
 FONT_DIR = Path(__file__).parent / "fonts"
@@ -98,7 +99,8 @@ def build_states(words, chunk: int, sync: float = 0.0):
 class _Drawer:
     """Draws one caption state (a chunk of words with one highlighted) on a transparent W x H image."""
 
-    def __init__(self, W, H, st):
+    def __init__(self, W, H, st, band: bool = False):
+        """band=True: images are only as tall as the caption (placed at y0), not the whole frame."""
         if st["font"] not in FONTS:
             raise ValueError(f"Bilinmeyen font: {st['font']}")
         self.W, self.H, self.st = W, H, st
@@ -108,6 +110,11 @@ class _Drawer:
         self.fname, self.var = FONTS[st["font"]]
         self.active, self.base = _rgba(st["active"]), _rgba(st["color"])
         self.f0 = self.font(self.size)
+        self.y0, self.bh = 0, H
+        if band:
+            sp = max(2, round(self.size / 11 * float(st.get("stroke", 1.0))))
+            self.y0 = max(0, (self.ypos - sp - 4) // 2 * 2)
+            self.bh = min(H - self.y0, int(self.size * 1.7) + 2 * sp + 8) // 2 * 2
 
     def font(self, px):
         ft = ImageFont.truetype(str(FONT_DIR / self.fname), px)
@@ -120,7 +127,7 @@ class _Drawer:
 
     def draw(self, ch, ai):
         st, W = self.st, self.W
-        img = Image.new("RGBA", (W, self.H), (0, 0, 0, 0))
+        img = Image.new("RGBA", (W, self.bh), (0, 0, 0, 0))
         d = ImageDraw.Draw(img)
         texts = [mask_word(w["word"]) if st["mask"] else w["word"] for w in ch]
         texts = [tr_upper(t) if st.get("upper", True) else t for t in texts]
@@ -134,7 +141,7 @@ class _Drawer:
         stroke = max(2, round(f.size / 11 * float(st.get("stroke", 1.0))))
         x = (W - total) / 2
         for i, tx in enumerate(texts):
-            d.text((x, self.ypos), tx, font=f, fill=self.active if i == ai else self.base,
+            d.text((x, self.ypos - self.y0), tx, font=f, fill=self.active if i == ai else self.base,
                    stroke_width=stroke, stroke_fill=(0, 0, 0, 255))
             x += d.textlength(tx, font=f) + sp
         return img
@@ -150,36 +157,42 @@ def preview(style: dict | None, W: int, H: int, text: str, frame: Image.Image | 
     return Image.alpha_composite(base, _Drawer(W, H, st).draw(ch, min(1, len(ch) - 1))).convert("RGB")
 
 
-def render(video: Path, words, out: Path, style: dict | None = None):
+def prepare(td: Path, W: int, H: int, words, style: dict | None, total: float):
+    """Caption overlay for a W x H frame of `total` seconds: writes the (band-sized) PNG states and an ffmpeg concat
+    list into `td`. Returns (list_path, y0): the overlay goes at y = y0."""
     st = {**DEFAULT_STYLE, **(style or {})}
-    W, H = probe_size(video)
-    drawer = _Drawer(W, H, st)
+    drawer = _Drawer(W, H, st, band=True)
     states = build_states(words, int(st["chunk"]), float(st.get("sync") or 0.0))
     if not states:
         raise RuntimeError("Altyazı için kelime bulunamadı.")
+    td = Path(td)
+    Image.new("RGBA", (W, drawer.bh), (0, 0, 0, 0)).save(td / "blank.png")
+    entries, t = [], 0.0
 
+    def add(p, dur):
+        entries.append(f"file '{p}'\nduration {dur:.3f}")
+
+    for n, (s, e, ai, ch) in enumerate(states):
+        if s > t + 0.01:
+            add(td / "blank.png", s - t)
+        p = td / f"s{n:05d}.png"
+        drawer.draw(ch, ai).save(p)
+        add(p, e - s)
+        t = e
+    if total > t + 0.01:        # overlay=shortest=1 would otherwise cut the video at the last caption
+        add(td / "blank.png", total - t)
+    (td / "list.txt").write_text("\n".join(entries + [entries[-1].split("\n")[0]]) + "\n")
+    return td / "list.txt", drawer.y0
+
+
+def render(video: Path, words, out: Path, style: dict | None = None):
+    """Captions over an existing video (used when the video is already laid out / has overlays)."""
+    W, H = probe_size(video)
     with tempfile.TemporaryDirectory() as td:
-        td = Path(td)
-        Image.new("RGBA", (W, H), (0, 0, 0, 0)).save(td / "blank.png")
-        entries, t = [], 0.0
-
-        def add(p, dur):
-            entries.append(f"file '{p}'\nduration {dur:.3f}")
-
-        for n, (s, e, ai, ch) in enumerate(states):
-            if s > t + 0.01:
-                add(td / "blank.png", s - t)
-            p = td / f"s{n:05d}.png"
-            drawer.draw(ch, ai).save(p)
-            add(p, e - s)
-            t = e
-        total = probe_duration(video)
-        if total > t + 0.01:        # overlay=shortest=1 would otherwise cut the video at the last caption
-            add(td / "blank.png", total - t)
-        (td / "list.txt").write_text("\n".join(entries + [entries[-1].split("\n")[0]]) + "\n")
+        lst, y0 = prepare(Path(td), W, H, words, style, probe_duration(video))
         out.parent.mkdir(parents=True, exist_ok=True)
         run_ok(["ffmpeg", "-y", "-v", "error", "-i", str(video), "-f", "concat", "-safe", "0",
-                "-i", str(td / "list.txt"), "-filter_complex",
-                "[1:v]fps=30,format=rgba[o];[0:v][o]overlay=shortest=1:format=auto",
-                "-c:v", "libx264", "-crf", "20", "-pix_fmt", "yuv420p", "-c:a", "aac", str(out)], "altyazı basma")
+                "-i", str(lst), "-filter_complex",
+                f"[0:v]{encode.fps_filter()}[b];[1:v]{encode.fps_filter()},format=rgba[o];[b][o]overlay=0:{y0}:shortest=1:format=auto",
+                *encode.video_args(), "-c:a", "aac", str(out)], "altyazı basma")
     return out

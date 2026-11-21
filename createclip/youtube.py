@@ -116,7 +116,7 @@ def parse_chat(path: Path, duration: float) -> list:
     return msgs
 
 
-def fetch_chat(vod: Vod, cache_dir: Path, progress=None, mode: str = "smart", workers: int = 0) -> ChatData:
+def fetch_chat(vod: Vod, cache_dir: Path, progress=None, mode: str = "smart", workers: int = 0, start: float = 0.0) -> ChatData:
     """Whole chat replay in one go (mode/workers are accepted for interface parity and ignored)."""
     cache_dir = Path(cache_dir)
     f = cache_dir / CHAT_FILE
@@ -131,11 +131,11 @@ def fetch_chat(vod: Vod, cache_dir: Path, progress=None, mode: str = "smart", wo
         if not f.exists():
             why = p.stderr.strip()[-250:] if p.returncode else "bu videoda sohbet tekrarı yok"
             raise YouTubeError("Sohbet tekrarı alınamadı: " + why)
-    msgs = parse_chat(f, vod.duration)
+    msgs = [m for m in parse_chat(f, vod.duration) if m["t"] >= start]
     if not msgs:
         raise YouTubeError("Sohbet tekrarı boş.")
     cov = Coverage()
-    cov.add(0.0, vod.duration)
+    cov.add(float(start), vod.duration)
     if progress:
         progress(1.0, len(msgs), "tam")
     return ChatData(msgs, cov, True, [])

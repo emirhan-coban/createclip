@@ -21,7 +21,7 @@ class JobReq(BaseModel):
     url: str
     n: int = 5
     captions: bool = True
-    keep_plain: bool = True
+    keep_plain: bool = False
     font: str = "montserrat"
     mask: bool = False
     layout: str = "none"
@@ -38,6 +38,17 @@ class JobReq(BaseModel):
     lead: float = 20
     max_height: int = 720
     reactions: bool = False
+    start_min: float = 0             # skip the first N minutes (crowded opening)
+    drafts: int = 0                  # extra moments fetched as raw previews, rendered only when picked
+
+
+class Pick(BaseModel):
+    project: str
+    i: int
+
+
+class RenderReq(BaseModel):
+    picks: list[Pick]
 
 
 class CompileReq(BaseModel):
@@ -50,6 +61,7 @@ class SettingsReq(BaseModel):
     gemini_key: str | None = None
     auto_watch: bool | None = None
     watch_hours: float | None = Field(None, ge=0.5, le=24)
+    fast: bool | None = None         # True = full speed, False = gentle (computer stays usable)
 
 
 class CleanupReq(BaseModel):
@@ -106,6 +118,7 @@ def make_app(root: Path) -> FastAPI:
     (root / "output").mkdir(parents=True, exist_ok=True)
     logfile = logmod.setup(root)
     settingsmod.configure(root)
+    logmod.set_gentle(not settingsmod.get("fast") and logmod.GENTLE)
     STALL = 120        # seconds without progress before a task is flagged as stalled
     app = FastAPI(title="createclip")
     tasks: dict[str, dict] = {}
@@ -210,12 +223,44 @@ def make_app(root: Path) -> FastAPI:
             layout={"mode": req.layout, "cells": layoutmod.default_cells(req.layout)},
             source=req.source, at=req.at, snap=req.snap, vocab=req.vocab,
             chat_mode="full" if (req.full_chat or req.chat_mode == "full") else "smart", audio_ok=req.audio_ok,
-            reactions=req.reactions)
+            reactions=req.reactions, start_at=max(0.0, req.start_min) * 60, drafts=max(0, min(40, req.drafts)))
 
         def job(progress):
             m = pipeline.run(req.url, root, o, progress)
             return {"dir": Path(m["dir"]).name}
         return {"id": spawn(job, label=req.url)}
+
+    @app.get("/api/drafts")
+    def drafts():
+        """Raw previews waiting to be picked: [{project, i, score, video, a, b, ...}], newest project first."""
+        out = []
+        for d in sorted((root / "output").glob("*/manifest.json"), key=lambda p: -p.stat().st_mtime):
+            try:
+                m = pipeline.load(d.parent)
+            except Exception:  # noqa: BLE001
+                continue
+            for c in sorted(m["clips"], key=lambda c: -(c.get("score") or 0)):
+                if c.get("status") == "draft" and c.get("raw") and (d.parent / c["raw"]).exists():
+                    out.append({"project": d.parent.name, "i": c["i"], "score": c.get("score") or 0, "slug": m["slug"],
+                                "video": f"/files/{d.parent.name}/{c['raw']}", "a": round(c["start"] - c["raw_start"], 2),
+                                "b": round(c["end"] - c["raw_start"], 2), "at": c["start"], "length": round(c["end"] - c["start"])})
+        return out
+
+    @app.post("/api/render")
+    def render_picks(req: RenderReq):
+        """Render the picked drafts (grouped per project) and discard nothing; ✗ on a draft deletes it."""
+        by = {}
+        for p in req.picks:
+            by.setdefault(_dir(p.project).name, []).append(p.i)
+
+        def job(progress):
+            done = 0
+            for k, (name, ids) in enumerate(by.items()):
+                pipeline.render_clips(root / "output" / name, ids,
+                                      lambda st, fr, msg="", k=k: progress(st, (k + fr) / len(by), msg))
+                done += len(ids)
+            return {"rendered": done, "dir": next(iter(by))}
+        return {"id": spawn(job, label=f"{sum(len(v) for v in by.values())} klip üretimi")}
 
     @app.get("/api/projects")
     def projects():
@@ -316,7 +361,7 @@ def make_app(root: Path) -> FastAPI:
     # ---- review inbox, ready packages
     @app.get("/inbox", response_class=HTMLResponse)
     def inbox_page():
-        return RedirectResponse("/#inbox")
+        return RedirectResponse("/#home")
 
     @app.get("/api/inbox")
     def inbox(status: str = "new"):
@@ -437,6 +482,8 @@ def make_app(root: Path) -> FastAPI:
         if ch.get("auto_watch") is False or "watch_hours" in ch:
             auto["next"] = None
         settingsmod.update(**ch)
+        if "fast" in ch:
+            logmod.set_gentle(not ch["fast"])          # applies to the next tools started, no restart needed
         return get_settings()
 
     @app.post("/api/projects/{name}/autometa")
