@@ -1,22 +1,21 @@
 # createclip
 
-**Kick VOD ya da biten bir YouTube yayınının linkini yapıştır → en iyi anları bulsun, klipleri kessin, Türkçe kelime kelime altyazı bassın, istersen 9:16'ya çevirsin.**
-Her klip web arayüzünde düzenlenebilir. Her şey yerelde çalışır (Apple Silicon Mac), buluta video veya ses yüklenmez.
+**Kick VOD ya da biten bir YouTube yayınının linkini yapıştır → en iyi anlar önizleme olarak gelsin, beğendiklerini seç, dikey (9:16) Türkçe kelime kelime altyazılı videoya çevrilsin.**
+Her şey yerelde çalışır (Apple Silicon Mac); video ve ses buluta gitmez (isteğe bağlı Gemini başlık/puan özelliği hariç, bkz. "Otomatik mod").
 
 > *Paste a Kick VOD or finished YouTube live-stream link → finds the best moments from chat activity, cuts clips, burns word-by-word Turkish captions
 > (local Whisper) and can reframe to 9:16. Local web editor + CLI.*
 
-![Yeni proje formu](docs/img/new-project.png)
-
 ## Özellikler
+- **Tek ekran, üç adım:** link yapıştır → 20 önizlemeyi izleyip beğendiklerine dokun → **Seçilenleri üret**. Ayar sormaz: varsayılan dikey 1080×1920, 30 fps, oyun+yüz yerleşimi (yüz bulunamazsa bulanık arka plan), altyazı açık.
 - **An bulma:** sohbet yoğunluğu (eşsiz sohbetçi sayısı, emote'lara düşük ağırlık, yayının ortalamasına göre z-skoru) ya da ses seviyesi.
-- **Altyazı:** `mlx-whisper large-v3` ile kelime zamanlı Türkçe altyazı; aktif kelime vurgulu, 3 font, renk/kontur/boyut/konum ayarı, küfür maskesi.
-- **9:16:** bulanık arka plan, tek pencere, iki pencere (üst/alt); pencereleri kareye tıklayarak elle seçersin.
-- **Üretmeden önce ayar + canlı önizleme**, ön ayar kaydetme (ör. "Shorts").
-- **Düzenlenebilir klipler:** kesimi ±1 sn ayarla, metni düzelt (zamanlama korunur), senkron kaydırıcısı, klip ekle/sil, skora göre sıralama.
-- Altyazılı **ve** altyazısız sürüm, `.srt` dışa aktarma.
+- **Altyazı:** `mlx-whisper large-v3` ile kelime zamanlı Türkçe altyazı; aktif kelime vurgulu, 3 font, renk/kontur/boyut/konum ayarı, küfür maskesi (klibe tıklayınca açılan düzenleyicide).
+- **9:16:** oyun+yüz (otomatik), bulanık arka plan, tek pencere, iki pencere; pencereleri kareye tıklayarak elle de seçebilirsin.
+- **Düzenlenebilir klipler:** kesimi ±1 sn ayarla, metni düzelt (zamanlama korunur), senkron kaydırıcısı, yorum sesi, klip ekle/sil.
+- **Yavaş / Hızlı anahtarı:** *Yavaş* üretirken bilgisayarı başka işe kullanabilirsin (varsayılan), *Hızlı* tam güç.
+- `.srt` dışa aktarma; kanal izleme + kuyruk, Gemini ile otomatik başlık (aşağıda).
 
-| Altyazı fontları (önizleme) | 9:16 |
+| Altyazı fontları (önizleme) | 9:16 (eski ekran görüntüsü) |
 |---|---|
 | ![Fontlar](docs/img/fonts.png) | ![Dikey](docs/img/portrait.png) |
 
@@ -43,16 +42,22 @@ Web arayüzü (önerilen):
 ```bash
 ./.venv/bin/createclip serve          # http://127.0.0.1:8765
 ```
-Komut satırı:
+Ana ekranda linki yapıştır ve **Başlat**; önizlemeler gelince **Seç**, sonra **Seçilenleri üret**. Biten klipte başlığı düzenleyip **Kaydet**
+dersen klip `ready/` klasörüne hazır paket olarak konur. **Gelişmiş** sekmesi: projeler, kanallar/kuyruk, Gemini anahtarı, otomatik izleme, disk temizliği.
+
+Komut satırı (`-n` = baştan sona üretilecek klip sayısı; önizleme/seç akışı arayüzde):
 ```bash
-./.venv/bin/createclip run "<kick-linki>" -n 5                        # altyazılı + altyazısız
+./.venv/bin/createclip run "<kick-linki>" -n 5                        # 5 altyazılı klip
+./.venv/bin/createclip run "<link>" --start 10:00 -n 5                # yayının ilk 10 dk'sını (kalabalık açılış) atla
 ./.venv/bin/createclip run "<link>" --layout stack --mask-profanity   # 9:16 iki pencere, küfür yıldızlı
 ./.venv/bin/createclip run "<link>" --at 1:44:50 --at 0:27:50-0:28:40 # elle zamanlar (sohbet gerekmez)
 ./.venv/bin/createclip run "<link>" --source audio                    # sohbet yerine ses seviyesi
 ./.venv/bin/createclip run "<link>" --full-chat --size 0.06 --ypos 0.7 --chunk 2 --sync -0.1 --max-height 1080
 ```
-Çıktı `output/<kanal>-<vod>/` altında: `clips/` (altyazısız), `captioned/` (altyazılı), `words/` (`.json`, `.srt`),
-`raw/` (kenar payı olan ham kesit), `chat.jsonl` (önbellek), `manifest.json`.
+Çıktı `output/<kanal>-<vod>/` altında: `captioned/` (bitmiş dikey altyazılı klip), `clips/` (kırpılmış ara dosya), `words/` (`.json`, `.srt`),
+`raw/` (kenar payı olan ham kesit; **taslak önizlemeler bundan oynatılır**), `chat.jsonl` (önbellek), `manifest.json`.
+Altyazısız/yerleşimsiz ara sürümler artık varsayılan olarak tutulmaz (`--plain` ile istenir; fazladan bir kodlama maliyeti vardır).
+Aynı yayını tekrar çalıştırırsan daha önce kesilmiş anlar atlanır (kaldığın yerden devam).
 
 ## Sohbet indirme süreleri (ölçüldü)
 Kick'in sohbet API'si bir istekte yalnızca ~5 sn'lik pencere verir ve sürekli yaklaşık **1,5 istek/sn**'ye izin verir
@@ -75,20 +80,20 @@ veriden seçilir. Parametreler gerçek 6 saatlik veride tarandı (istekleri ~%33
 flowchart LR
   A[Kick VOD linki] --> B[Sohbet indir<br/>veya ses analizi]
   B --> C[Pikler: z-skoru<br/>30 aday]
-  C --> D[yt-dlp ile sadece<br/>ilgili aralık]
-  D --> E[Kesimi konuşma<br/>arasına hizala]
+  C --> D[20 an: kodlamasız<br/>paralel önizleme indirme]
+  D --> E[Sen seç]
   E --> F[Whisper large-v3<br/>kelime zamanları]
-  F --> G[Pillow + ffmpeg<br/>altyazı bindirme]
-  G --> H[Opsiyonel 9:16]
-  H --> I[Web editörü]
+  F --> G[Tek ffmpeg geçişi:<br/>9:16 + altyazı, 30 fps]
+  G --> I[Hazır klip / düzenleyici]
 ```
 1. **Sohbet:** Kick'in resmi olmayan API'sinden `curl` ile, hız sınırının altında (≈1,5 istek/sn) indirilir ve istek istek diske yazılır. Bir istek ~5 sn'lik pencere ve en çok ~25
    mesaj döndürür; `cursor` alanı mesaj atlattığı için kullanılmaz. Alınamazsa ses seviyesine bakılır: YouTube'da yalnız ses akışı (112 dk için 38 MB, 13 sn), Kick'te ses-yalnız biçim olmadığından en düşük video (≈1,7 MB/dk); ses seviyesi ölçülür.
 2. **Pik:** 10 sn dilimlerde skor, ilk 2 dk / son 1 dk atlanır, pikler ≥90 sn arayla, pencere pikten 20 sn önce başlar (25-60 sn).
-3. **Kesim:** yalnız ilgili aralık (±10 sn pay) indirilir; kesim noktaları `silencedetect` ile en yakın konuşma arasına çekilir.
+3. **Önizleme:** yalnız ilgili aralık (±10 sn pay) **yeniden kodlanmadan** indirilir (birkaç aralık aynı anda); kesim noktaları `silencedetect` ile en yakın konuşma arasına çekilir.
+   Taslak seçilince tam kare kırpılır.
 4. **Altyazı:** ipucu (prompt) kullanılmaz: ölçümde uzun ipucu konuşmanın büyük kısmını atlatıyordu (69 yerine 27 kelime).
-   İsteğe bağlı kısa `--vocab "Berk, Derbeder"`. Altyazı Pillow ile çizilip ffmpeg `overlay` ile bindirilir (libass gerekmez).
-5. **9:16:** ffmpeg ile pencere kırpma / bulanık arka plan; yüz takibi yok, her yayıncının yerleşimi farklı olduğu için pencereler elle ayarlanır.
+   İsteğe bağlı kısa `--vocab "Berk, Derbeder"`. Altyazı Pillow ile çizilip (yalnız altyazı bandı kadar görsel) ffmpeg `overlay` ile bindirilir (libass gerekmez).
+5. **9:16:** yerleşim ve altyazı **tek ffmpeg geçişinde** basılır; oyun+yüz (OpenCV ile yüz bulma), bulanık arka plan, tek veya iki pencere; pencereler düzenleyicide elle ayarlanabilir.
 
 ### Altyazı senkronu
 Kayma kaynağı bulundu ve düzeltildi: kelime zamanları üst üste bindiğinde bindirme zaman çizelgesi gecikiyor ve hata klip boyunca
@@ -101,14 +106,16 @@ zamanları 5 klipte ses başlangıçlarıyla karşılaştırıldı: medyan sapma
 ./.venv/bin/python -m pytest -q       # 84 test
 ```
 Dosyalar: `kick.py` (VOD + sohbet), `peaks.py`, `audio_peaks.py`, `clipper.py`, `transcribe.py`, `captions.py`, `layout.py`,
-`youtube.py`, `sources.py` (YouTube + platform seçimi), `watch.py` (izleyici + kuyruk), `review.py` (onay kutusu + hazır paket), `ytdlp.py`, `log.py`, `pipeline.py` (iş akışı + düzenleme), `web/` (FastAPI + tek sayfa arayüz), `syncfix.py` (senkron ölçüm aracı).
+`youtube.py`, `sources.py` (YouTube + platform seçimi), `watch.py` (izleyici + kuyruk), `review.py` (klip listesi + hazır paket), `ytdlp.py`, `log.py`, `pipeline.py` (önizleme/üretim hattı + düzenleme), `render.py` + `encode.py` (tek geçişli render, kodlayıcı ayarı),
+`overlay.py`, `compile.py`, `cleanup.py`, `dupes.py`, `moments.py` + `gemini.py` + `titles.py` + `autometa.py` (Gemini/Claude başlık ve puan), `settings.py`, `autostart.py`, `notify.py`, `doctor.py`,
+`web/` (FastAPI + tek sayfa arayüz), `syncfix.py` (senkron ölçüm aracı), `scripts/bench.py` (kodlama ölçümü).
 
 ## Klip kanalı akışı (izleyici, kuyruk, onay kutusu)
 ```bash
 ./.venv/bin/createclip channels add kick.com/kanal -n 5 --layout blur --max-height 1080   # ya da youtube.com/@kanal
 ./.venv/bin/createclip watch --every 6          # tara + işle + bekle (gece açık bırak); --once: bir kez
 ./.venv/bin/createclip queue                    # durum; queue retry|confirm|rm <id>, queue clear
-./.venv/bin/createclip serve                    # http://127.0.0.1:8765/inbox  → onay kutusu
+./.venv/bin/createclip serve                    # http://127.0.0.1:8765  → Klipler ekranı
 ```
 - **İzleyici:** kanalın biten yayınlarını `yt-dlp` ile listeler (Kick: `kick.com/<kanal>/videos`, YouTube: `/@kanal/streams`),
   canlı/süresi 0 olanları ve `--min-minutes`'tan kısaları atlar, **yeni olanları** kuyruğa koyar. Kanalı ilk eklediğinde yalnızca en yeni
@@ -116,9 +123,10 @@ Dosyalar: `kick.py` (VOD + sohbet), `peaks.py`, `audio_peaks.py`, `clipper.py`, 
   kanalda 30 gün) saklıyor, bu yüzden tarama aralığını bundan kısa tut (üçüncü taraf kaynaklar süreyi farklı veriyor).
 - **Kuyruk** (`output/queue.json`): durdurup başlatınca kaldığı yerden devam eder; hata 3 kez denenir; sohbet yoksa iş **"onay bekliyor"**
   olur (tüm sesi indirmeden önce sorar), `queue confirm <id>` ya da arayüzdeki düğme.
-- **Onay kutusu** (`/inbox`): tüm projelerin klipleri skora göre; **A** onayla, **R** reddet, **S/J/K** gezin. Başlık/açıklama/etiket
-  önerisi kural tabanlıdır (ilk cümle, kaynak bağlantısı + zaman damgası, sık kelimeler; model kullanılmaz) ve düzenlenebilir.
-  Onaylanan klip **hazır pakete** aktarılır: `ready/<tarih>/<proje>_<klip>/` içinde `video.mp4`, `baslik.txt`, `aciklama.txt`,
+- **Hazır klipler** (ana ekranın altı): biten klipler; başlığı düzenle, **Kaydet** (onay) ya da **Sil**. Başlık/açıklama/etiket
+  önerisi Gemini (ya da Claude) anahtarı varsa model üretir, yoksa kural tabanlıdır (ilk cümle, kaynak bağlantısı + zaman damgası, sık kelimeler). Kuyruktan gelen
+  yayınlarda en iyi 5 klip üretilmiş, kalan 15 taslak olarak önizleme bölümünde bekler.
+  Kaydedilen klip **hazır pakete** aktarılır: `ready/<tarih>/<proje>_<klip>/` içinde `video.mp4`, `baslik.txt`, `aciklama.txt`,
   `etiketler.txt`, `kapak.jpg`; platform sınırı/dikey değil uyarısı verir. **Otomatik yükleme yoktur** (YouTube'da denetimsiz API
   projelerinin yüklemeleri özel kalır, TikTok'ta denetimsiz istemci yalnızca özel hesaba paylaşır; bunlar üçüncü taraf kaynaklardan, denenmedi).
 - **Kanal profili:** bir klibin altyazı stilini ve 9:16 yerleşimini editörde bir kez ayarla, klip kartındaki **Kanal profili yap** ile
@@ -139,7 +147,7 @@ Hiçbiri "politikaya uyar" garantisi değildir.
   (komutlar, çok uzun mesajlar, tekrarlar ve çok sık mesajlar elenir).
 - **Başlık kartı**: ilk 3 saniyede klibin ne hakkında olduğunu söyleyen kart.
 - **Yorum sesi**: editörde klip oynarken mikrofona konuş (kulaklık tak); kayıt klibe karıştırılır, sen konuşurken orijinal ses kısılır.
-- **Derleme**: Onay kutusunda "Günün en iyi anları derlemesi" ya da `createclip compile -n 5`. Açılış kartı, geri sayım kartları,
+- **Derleme**: `createclip compile -n 5` (arayüzde düğmesi yok). Açılış kartı, geri sayım kartları,
   klipler; kaynak yayın ve zaman damgası listesi yanında `.txt` olarak çıkar (`ready/derleme/`).
 - **Yüz takibi** (`--layout face`): OpenCV (Haar) ile yayıncının yüz kamerasını bulur; üstte oyun, altta yakın yüz.
   Bulunamazsa bulanık arka plana döner. Ölçüm: tek bir yayıncının 12 klibinin 12'sinde bulundu (0,87-0,89 / 0,74-0,77 konumunda),
@@ -148,9 +156,8 @@ Hiçbiri "politikaya uyar" garantisi değildir.
 - **Ses seviyesi**: yeni kesimler -16 LUFS'a yaklaştırılır (tek geçişli loudnorm). Ölçüm: 5 klipte seviye farkı 3,9 LU'dan 2,0 LU'ya indi.
 - **Ölü sessizlik**: klip uzun bir sessizlikle başlıyor/bitiyorsa baş/son kırpılır (ses ve görüntü birlikte).
 - **Benzer klipler**: aynı anın iki kez bulunması ya da farklı projelerde benzer konuşma "benzer klip" etiketiyle işaretlenir.
-- **Başlık önerisi (isteğe bağlı)**: `ANTHROPIC_API_KEY` ayarlıysa Onay kutusunda "Claude ile öner" düğmesi çıkar; yalnız o düğmeye basınca
-  klibin konuşma metni Anthropic'e gönderilir. Anahtar yokken yerel, basit öneri kullanılır. Gerçek API ile bu oturumda denenmedi
-  (yalnız sahte yanıtla test edildi).
+- **Başlık önerisi (isteğe bağlı)**: Gemini anahtarı yoksa `ANTHROPIC_API_KEY` ayarlıysa üretilen her klibin konuşma metni Anthropic'e gönderilip
+  başlık/açıklama/etiket yazılır (otomatik, düğme yok). Anahtar yokken yerel, basit öneri kullanılır. Gerçek API ile denenmedi (yalnız sahte yanıtla test edildi).
 - **İptal**: çalışan iş, alttaki çubuktan iptal edilir; çalışan ffmpeg/yt-dlp süreci öldürülür (konuşma çözme sürerken bir sonraki adımda durur).
 - **Bildirim**: izleyici ve web işleri bitince macOS bildirimi çıkar.
 - **Temizlik**: `createclip cleanup` neyin silineceğini gösterir, `--yes` ile siler. Yalnız yeniden üretilebilir dosyalar
@@ -193,10 +200,10 @@ atladı (large-v3'ün bulduğu kelimelerin %37 ve %44'ü; konuşma süresi 67 sn
 
 ## Otomatik mod (Gemini ile)
 
-1. Arayüzde **Yeni** sekmesindeki kurulum kartına kanal linkini (ve istersen ücretsiz [Gemini anahtarını](https://aistudio.google.com/apikey)) yaz; **Kur ve otomatik izlemeyi aç**.
+1. **Gelişmiş** sekmesinde: **Kanallar** bölümünden kanalı ekle, **Ayarlar**'dan "Otomatik mod"u aç ve istersen ücretsiz [Gemini anahtarını](https://aistudio.google.com/apikey) kaydet.
 2. Uygulama açıkken kanalları her N saatte bir tarar (varsayılan 3; Kick VOD'u 7 günde silinebilir), yeni yayınları işler, bitince bildirim verir.
-3. Gemini anahtarı varsa her klip **başlık, açıklama, etiket** ve **AI puanı (1-10)** ile gelir; Onay kutusu sırası `skor × (0.5 + AI/10)`. Anahtar yoksa eski davranış (yerel basit öneri, yalnız sohbet/ses skoru).
-4. **Onayla** = hemen `ready/<tarih>/…` hazır paketi (Shorts). "★ En iyi 3'ü onayla" toplu onay verir.
+3. Gemini anahtarı varsa her klip **başlık, açıklama, etiket** ve **AI puanı (1-10)** ile gelir; sıralama `skor × (0.5 + AI/10)`. Anahtar yoksa eski davranış (yerel basit öneri, yalnız sohbet/ses skoru).
+4. **Kaydet** = hemen `ready/<tarih>/…` hazır paketi (Shorts).
 5. Bilgisayar açılınca kendiliğinden başlasın: `createclip autostart on` (kapatmak: `off`).
 
 Notlar: Yükleme otomasyonu yoktur (kasıtlı). Anahtar `settings.json`'da (0600) saklanır. Ücretsiz katmanda gönderilen klip metni/sesi Google'ın ürün geliştirmesinde kullanılabilir. AI puanının sıralamayı ne kadar iyileştirdiği **ölçülmedi**; Gemini limit/model adı değişebilir (`CREATECLIP_GEMINI_MODEL` ile model seçilir, varsayılan `gemini-flash-latest`). Gemini gerçek anahtarla henüz denenmedi; testler sahte HTTP ile.
@@ -213,8 +220,8 @@ sonsuza dek bekleyebilir; kod `--impersonate chrome` kullanır (`createclip/ytdl
 ## Görüntü kalitesi
 YouTube'da ≤720p tek parça (ses+video birlikte) yalnızca 360p'dir; eski seçici bu yüzden 360p indiriyordu (ölçüldü: biçim 18, 640×360).
 Artık H.264 ayrı video+ses akışları birleştirilir (denendi: 720p60 → 1280×720 60 fps h264+aac, görüntü/ses süreleri eşit; Kick'te
-720p60/1080p60). Dikey (9:16) yerleşimde kaynak kırpılıp büyütüldüğü için 1080p önerilir (arayüz uyarır). Klip iki kez yeniden kodlanır
-(kesim crf 18, altyazı bindirme crf 20); bunun görsel etkisi ölçülmedi.
+720p60/1080p60). Kaynak 720p iken dikey çıktı 1080×1920'ye büyütülür (ek ayrıntı yok, platform standardı); 1080p kaynak için `--max-height 1080`.
+Klip iki kez kodlanır: kesim (crf 18, hızlı ön ayar, 30 fps) ve tek geçişli son render (crf 21 `veryfast`); bunun görsel etkisi ölçülmedi.
 
 ## Sınırlar
 - Kick sohbet API'si resmi değil; değişirse kırılabilir. VOD'lar Kick'te süreli saklanır.
@@ -222,7 +229,7 @@ Artık H.264 ayrı video+ses akışları birleştirilir (denendi: 720p60 → 128
   metin düzeltmelerin sıfırlanır.
 - Ses yedeği yalnızca ölçüm adımı gerçek dosyada denendi; tam VOD ile uçtan uca çalıştırılmadı.
 - Kick'in CDN'i zaman zaman takılır: indirme 4 dk zaman aşımı ve 3 deneme ile korunur.
-- Küfür filtresi yalnızca yaygın kök listesine bakar. İş durdurma (iptal) henüz yok.
+- Küfür filtresi yalnızca yaygın kök listesine bakar. Çalışan iş alttaki çubuktan iptal edilir.
 - Yalnızca kendi içeriğin ya da izin aldığın yayınlar için kullan.
 
 ## Lisans
