@@ -7,7 +7,7 @@ type State = "todo" | "now" | "done" | "stopped";
 export function Steps({ job }: { job: JobView }) {
   const doneClips = Object.values(job.clips).filter((c) => c.done).length;
   const total = job.moments.length;
-  const audio = job.activity?.source === "audio";
+  const audio = !!job.audio || job.activity?.source === "audio";
   const final = !!job.activity && !job.activity.partial;
   const finished = job.status === "done";
   const halted = job.status === "failed" || job.status === "cancelled" || job.status === "blocked";
@@ -18,6 +18,7 @@ export function Steps({ job }: { job: JobView }) {
       state: final ? "done" : job.info ? "now" : "todo",
       live: final
         ? audio ? "Ses seviyesi çıkarıldı" : <><Counter value={job.activity!.messages} /> mesaj okundu</>
+        : job.audio ? <>{job.fallback ? "Sohbet tekrarı yok, ses dinleniyor · " : ""}{job.audio.text}</>
         : job.chat ? <><Counter value={job.chat.messages} /> mesaj · {job.chat.stage}</> : "Sırada",
     },
     { name: "Anları bul", state: total ? "done" : final ? "now" : "todo",

@@ -11,7 +11,7 @@ export type Mode = "blur" | "crop" | "stack";
 export type Project = {
   version: 1;
   trim: { in: number; out: number };
-  layout: { mode: Mode; cells: Cell[] };
+  layout: { mode: Mode; split: number; cells: Cell[] };   // split: share of the height of the top window (stack)
   audio: { volume: number; normalize: boolean };
   captions: Captions;
   texts: TextLayer[];
@@ -26,7 +26,14 @@ export type Layer = {
   cell?: number;         // which cell (0/1) a drag on this layer moves
 };
 
-export const ASPECT: Record<"crop" | "stack", [number, number]> = { crop: [9, 16], stack: [9, 8] };
+export const SPLIT_MIN = 0.25;
+export const SPLIT_MAX = 0.75;
+
+/** Pixel heights of the top and bottom window of the two-window layout (mirrors editor.stack_heights). */
+export function stackHeights(split: number): [number, number] {
+  const top = Math.floor(Math.floor(OH * Math.min(SPLIT_MAX, Math.max(SPLIT_MIN, split))) / 2) * 2;
+  return [top, OH - top];
+}
 
 export function cellRect(W: number, H: number, cell: Cell, aw: number, ah: number): Box {
   const zoom = Math.max(1, cell.zoom);
@@ -51,9 +58,10 @@ export function plan(p: Project, W: number, H: number): Layer[] {
   const { mode, cells } = p.layout;
   if (mode === "crop") return [cellLayer("c0", W, H, cells[0], 9, 16, { x: 0, y: 0, w: OW, h: OH }, 0, true)];
   if (mode === "stack") {
+    const [th, bh] = stackHeights(p.layout.split ?? 0.5);
     return [
-      cellLayer("c0", W, H, cells[0], 9, 8, { x: 0, y: 0, w: OW, h: OH / 2 }, 0, true),
-      cellLayer("c1", W, H, cells[1], 9, 8, { x: 0, y: OH / 2, w: OW, h: OH / 2 }, 1, false),
+      cellLayer("c0", W, H, cells[0], OW, th, { x: 0, y: 0, w: OW, h: th }, 0, true),
+      cellLayer("c1", W, H, cells[1], OW, bh, { x: 0, y: th, w: OW, h: bh }, 1, false),
     ];
   }
   const cover = Math.max(OW / W, OH / H);
@@ -66,7 +74,7 @@ export function plan(p: Project, W: number, H: number): Layer[] {
 
 export const defaultProject = (dur: number): Project => ({
   version: 1, trim: { in: 0, out: dur },
-  layout: { mode: "blur", cells: [{ cx: 0.5, cy: 0.5, zoom: 1 }, { cx: 0.85, cy: 0.8, zoom: 3 }] },
+  layout: { mode: "blur", split: 0.5, cells: [{ cx: 0.5, cy: 0.5, zoom: 1 }, { cx: 0.85, cy: 0.8, zoom: 3 }] },
   audio: { volume: 1, normalize: true },
   captions: defaultCaptions(),
   texts: [],

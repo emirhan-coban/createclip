@@ -10,3 +10,4 @@ autoshorts.json
 settings.json
 web/node_modules/
 web/dist/
+autoshorts/webdist/

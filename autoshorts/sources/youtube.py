@@ -7,6 +7,7 @@ Streams that are still live cannot be cut yet and are rejected with a clear mess
 import json
 import re
 import subprocess
+import time
 from pathlib import Path
 
 from . import ytdlp
@@ -126,8 +127,16 @@ def fetch_chat(vod: Vod, cache_dir: Path, progress=None, mode: str = "smart", wo
         for old in cache_dir.glob("chat.*"):
             if old.name != CHAT_FILE and old.suffix != ".jsonl":
                 old.unlink()
-        p = run(_cmd("--skip-download", "--no-playlist", "--write-subs", "--sub-langs", "live_chat",
-                     "-o", str(cache_dir / "chat.%(ext)s"), vod.url), "youtube sohbet tekrarı", timeout=900)
+        last = [0.0]
+
+        def on_line(line: str):
+            """yt-dlp prints fragment progress while it walks the replay: '[download]  12.3% ... (frag 12/100)'."""
+            m = re.search(r"(\d+(?:\.\d+)?)%", line)
+            if m and progress and time.time() - last[0] > 0.7:
+                last[0] = time.time()
+                progress(min(0.99, float(m.group(1)) / 100), 0, "sohbet tekrarı indiriliyor")
+        p = run(_cmd("--newline", "--skip-download", "--no-playlist", "--write-subs", "--sub-langs", "live_chat",
+                     "-o", str(cache_dir / "chat.%(ext)s"), vod.url), "youtube sohbet tekrarı", timeout=1800, on_line=on_line)
         if not f.exists():
             why = p.stderr.strip()[-250:] if p.returncode else "bu videoda sohbet tekrarı yok"
             raise YouTubeError("Sohbet tekrarı alınamadı: " + why)

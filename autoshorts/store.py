@@ -27,7 +27,8 @@ def connect(db: Path | None = None) -> sqlite3.Connection:
     con.row_factory = sqlite3.Row
     con.executescript(SCHEMA)
     have = {r[1] for r in con.execute("PRAGMA table_info(clips)")}
-    for col, typ in (("src_file", "TEXT"), ("src_start", "REAL"), ("src_end", "REAL")):      # editor source footage
+    for col, typ in (("src_file", "TEXT"), ("src_start", "REAL"), ("src_end", "REAL"),      # editor source footage
+                     ("key_start", "REAL")):          # the finder's original start: the dedupe key (`start` may be snapped to a sentence)
         if col not in have:
             con.execute(f"ALTER TABLE clips ADD COLUMN {col} {typ}")
     con.commit()
@@ -73,14 +74,16 @@ def pending_videos(con) -> list[dict]:
 
 # ---- clips
 def add_clip(con, video_url: str, start: float, end: float, score: float, engine: str) -> int | None:
-    cur = con.execute("INSERT OR IGNORE INTO clips(video_url, start, end, score, engine, status, created) "
-                      "VALUES (?,?,?,?,?,'new',?)", (video_url, round(start, 2), round(end, 2), score, engine, time.time()))
+    if find_clip(con, video_url, start):
+        return None
+    cur = con.execute("INSERT OR IGNORE INTO clips(video_url, start, end, score, engine, status, created, key_start) "
+                      "VALUES (?,?,?,?,?,'new',?,?)", (video_url, round(start, 2), round(end, 2), score, engine, time.time(), round(start, 2)))
     con.commit()
     return cur.lastrowid if cur.rowcount else None
 
 
 def find_clip(con, video_url: str, start: float) -> dict | None:
-    r = rows(con, "SELECT * FROM clips WHERE video_url=? AND start=?", video_url, round(start, 2))
+    r = rows(con, "SELECT * FROM clips WHERE video_url=? AND COALESCE(key_start, start)=?", video_url, round(start, 2))
     return r[0] if r else None
 
 

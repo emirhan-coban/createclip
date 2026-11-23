@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import config, download, editor, store, transcribe
+from . import config, download, editor, faces, store, transcribe
 from .jobs import App
 
 def _clip_json(c: dict) -> dict:
@@ -22,7 +22,7 @@ def _clip_json(c: dict) -> dict:
             "file": Path(c["file"]).name if c["file"] else "", "created": c["created"]}
 
 
-DIST = Path(__file__).resolve().parent.parent / "web" / "dist"
+DIST = config.ui_dist()
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "[::1]", "testserver"}
 
 
@@ -49,6 +49,12 @@ def _num(lo, hi, cast=float):
 def _engine(v):
     if v not in ("auto", "chat", "audio", "transcript"):
         raise ValueError("auto, chat, audio ya da transcript olmalı")
+    return v
+
+
+def _choice(v, allowed):
+    if v not in allowed:
+        raise ValueError("geçersiz seçenek")
     return v
 
 
@@ -81,7 +87,9 @@ def _tags(v):
 
 EDITABLE = {"engine": _engine, "clips_per_video": _num(1, 20, int), "min_len": _num(10, 120, int), "max_len": _num(15, 180, int),
             "lead": _num(0, 60, int), "language": lambda v: _lang(v), "skip_start_min": _num(0, 600), "output_dir": _dir, "hashtags": _tags,
-            "credit": lambda v: bool(v)}
+            "credit": lambda v: bool(v), "smart_cut": lambda v: _choice(v, ("auto", True, False)),
+            "layout": lambda v: _choice(v, ("blur", "face")), "split": _num(0.25, 0.75), "keep_source_days": _num(0, 365, int),
+            "stall_min": _num(0, 240, int)}
 
 
 @contextlib.contextmanager
@@ -329,6 +337,29 @@ def create_app(jobs: App | None = None) -> FastAPI:
             return editor.clean_sources(con)
         finally:
             con.close()
+
+    @app.get("/api/faces/status")
+    def faces_status():
+        return {"available": faces.available()}
+
+    @app.post("/api/clips/{cid}/faces")
+    async def start_faces(cid: int):
+        c = clip_row(cid)
+        if not editor.source_path(c):
+            raise HTTPException(409, "Kaynak görüntü yok")
+        if not faces.available():
+            raise HTTPException(409, "Yüz bulmak için OpenCV gerekli: ./.venv/bin/pip install -e '.[faces]'")
+        return {"id": jobs.submit("faces", clip_id=cid)["id"]}
+
+    @app.get("/api/clips/{cid}/face-layout")
+    def face_layout(cid: int, split: float = 0.4, top: str = "face"):
+        """The two-window layout for the camera found in this clip (404 when none was found yet)."""
+        c = clip_row(cid)
+        info = editor.source_info(c)
+        face = faces.load(editor.editor_dir(cid) / "face.json")
+        if not info or not face:
+            raise HTTPException(404, "Kamera bulunamadı")
+        return {"face": face, "layout": editor.face_layout(face, info["width"], info["height"], split, "game" if top == "game" else "face")}
 
     @app.get("/api/captions/status")
     def captions_status():

@@ -17,6 +17,11 @@ DEFAULTS = {
     "hashtags": ["#shorts"],
     "credit": True,            # put the source link in the description file
     "watch_every_min": 60,
+    "smart_cut": "auto",       # snap cuts to sentence boundaries + title from speech (Whisper): auto = when the model is on disk
+    "layout": "blur",          # layout of new clips: blur (blurred background) | face (camera on top, game below)
+    "split": 0.4,              # face layout: share of the height given to the camera window (0.25-0.75)
+    "keep_source_days": 14,    # source footage of clips with no saved edit is deleted after N days (0 = keep)
+    "stall_min": 20,           # a job that makes no progress for N minutes is stopped (0 = never)
 }
 _root = Path.cwd()
 
@@ -24,6 +29,15 @@ _root = Path.cwd()
 def configure(root):
     global _root
     _root = Path(root)
+
+
+def ui_dist() -> Path:
+    """The built web app: bundled in the package (autoshorts/webdist, made by `autoshorts build-ui`) or the repo's web/dist."""
+    here = Path(__file__).resolve().parent
+    for d in (here / "webdist", here.parent / "web" / "dist"):
+        if (d / "index.html").exists():
+            return d
+    return here.parent / "web" / "dist"
 
 
 def root() -> Path:

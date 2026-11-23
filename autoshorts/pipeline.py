@@ -1,7 +1,8 @@
 """The whole chain: link -> moments -> raw cuts -> vertical clips -> saved in the output folder."""
 import re
+import sqlite3
 
-from . import config, download, export, finder, meta, render, store
+from . import config, download, editor, export, faces, finder, meta, render, speech, store, transcribe
 from .proc import Cancelled, log
 
 PAD = 6.0      # fallback for `source_pad`: extra footage around a cut, so the exact trim never runs off the file
@@ -116,8 +117,16 @@ def process_video(con, cfg: dict, url: str, n: int | None = None, at: list[str] 
         raise
 
 
+def _smart(cfg: dict) -> bool:
+    v = cfg.get("smart_cut", "auto")
+    if v == "auto":
+        return transcribe.available() and transcribe.cached()
+    return bool(v) and transcribe.available()
+
+
 def make_clip(con, cfg: dict, video: download.Video, clip_id: int, m: finder.Moment, progress=_noop):
-    """Download the range, render it vertical, save it (with title/description) to the output folder."""
+    """Download the range, (optionally) listen to it to snap the cut to sentences, render it vertical and save it with
+    title/description to the output folder."""
     base = config.data_dir() / "clips"
     raw = base / "source" / f"{clip_id}.mp4"                 # kept: the editor cuts from it
     pad = float(cfg.get("source_pad", PAD))
@@ -125,16 +134,54 @@ def make_clip(con, cfg: dict, video: download.Video, clip_id: int, m: finder.Mom
     end = min(video.duration, m.end + pad) if video.duration else m.end + pad
     progress(0.05, "yayından indiriliyor")
     download.fetch_range(video.url, start, end, raw, cfg["max_height"])
+    store.set_source(con, clip_id, str(raw), start, end)
+    info = editor.source_info(store.get_clip(con, clip_id))   # also shifts the file's timestamps to start at 0
+    cs, ce = m.start, m.end
+    words = []
+    if _smart(cfg):
+        progress(0.3, "konuşma dinleniyor, kesim cümleye oturtuluyor")
+        try:
+            words = editor.transcribe_source(con, cfg, clip_id)
+        except Cancelled:
+            raise
+        except Exception as e:  # noqa: BLE001 - speech is a bonus: the clip is still made from the peak
+            log.warning("clip %s: speech analysis skipped: %s", clip_id, e)
+            words = []
+    if words:
+        a, b = speech.snap(words, cs - start, ce - start, min_len=cfg["min_len"], max_len=cfg["max_len"])
+        cs, ce = start + max(0.0, a), start + min(info["duration"], b)
+        if (cs, ce) != (m.start, m.end):
+            try:
+                store.update_clip(con, clip_id, start=round(cs, 2), end=round(ce, 2))
+            except sqlite3.IntegrityError:               # another clip already starts there: keep the original cut
+                cs, ce = m.start, m.end
+    project = None
+    if cfg.get("layout") == "face" and faces.available():
+        progress(0.45, "kamera aranıyor")
+        try:
+            face = faces.detect(raw, info["duration"])
+        except faces.FaceError as e:
+            log.warning("clip %s: no face layout: %s", clip_id, e)
+            face = None
+        if face:
+            project = editor.default_project(store.get_clip(con, clip_id))
+            project["layout"] = editor.face_layout(face, info["width"], info["height"], float(cfg.get("split", 0.4)))
+            project["trim"] = {"in": round(cs - start, 2), "out": round(ce - start, 2)}
     out = base / f"{clip_id}.mp4"
     progress(0.55, "dikeye çevriliyor, ses ayarlanıyor")
-    render.vertical(raw, m.start - start, m.end - m.start, out)
+    if project:
+        editor.render_project(raw, editor.clean_project(project, info["duration"]), out, info,
+                              lambda f, t="": progress(0.55 + 0.4 * f, "dikeye çevriliyor, ses ayarlanıyor"))
+        store.save_project(con, clip_id, editor.clean_project(project, info["duration"]))
+    else:
+        render.vertical(raw, cs - start, ce - cs, out)
     progress(0.95, "kaydediliyor")
     render.thumbnail(out, base / f"{clip_id}.jpg")
-    store.set_source(con, clip_id, str(raw), start, end)
-    info = meta.make(video.title, video.channel, video.url, m.start, cfg)
-    saved = export.save(cfg, clip_id, video.channel, m.start, out, base / f"{clip_id}.jpg", info["title"], info["description"])
-    store.update_clip(con, clip_id, file=str(saved), title=info["title"], description=info["description"],
-                      tags=info["tags"], status="done", error=None)
+    spoken = [w for w in words if w["end"] > cs - start and w["start"] < ce - start]
+    meta_info = meta.make(video.title, video.channel, video.url, cs, cfg, spoken)
+    saved = export.save(cfg, clip_id, video.channel, cs, out, base / f"{clip_id}.jpg", meta_info["title"], meta_info["description"])
+    store.update_clip(con, clip_id, file=str(saved), title=meta_info["title"], description=meta_info["description"],
+                      tags=meta_info["tags"], status="done", error=None)
     return saved
 
 

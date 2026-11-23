@@ -3,6 +3,8 @@ import { Link, useParams } from "react-router-dom";
 import { api, dur, friendlyError, type Clip } from "../lib/api";
 import { defaultCaptions } from "../lib/captions";
 import { useJobPoll } from "../lib/useJobPoll";
+import { useJob } from "../lib/useJob";
+import { Terminal } from "../components/Terminal";
 import { OW, OH, type Mode, type Project } from "../lib/layout";
 import { useProject } from "../lib/useProject";
 import { Stage } from "../components/editor/Stage";
@@ -74,7 +76,7 @@ function GetSource({ clip, onReady }: { clip: Clip; onReady: () => void }) {
 function Workspace({ data, reload }: { data: Ready; reload: () => void }) {
   const { clip, source } = data;
   // projects saved before captions existed have no captions block
-  const initial = useMemo(() => ({ ...data.project, captions: data.project.captions ?? defaultCaptions(), texts: data.project.texts ?? [] }), [data.project]);
+  const initial = useMemo(() => ({ ...data.project, layout: { ...data.project.layout, split: data.project.layout.split ?? 0.5 }, captions: data.project.captions ?? defaultCaptions(), texts: data.project.texts ?? [] }), [data.project]);
   const { project, edit, undo, redo, canUndo, canRedo, saving } = useProject(clip.id, initial);
   const [assets, setAssets] = useState<Assets | null>(null);
   const [master, setMaster] = useState<HTMLVideoElement | null>(null);
@@ -82,6 +84,8 @@ function Workspace({ data, reload }: { data: Ready; reload: () => void }) {
   const [time, setTime] = useState(data.project.trim.in);
   const [playing, setPlaying] = useState(false);
   const [exportId, setExportId] = useState<number | null>(null);
+  const [termId, setTermId] = useState<number | null>(null);          // job shown in the terminal (export or camera search)
+  const term = useJob(termId);
   const [exportErr, setExportErr] = useState("");
   const [videoErr, setVideoErr] = useState(false);
   const [selText, setSelText] = useState<string | null>(null);
@@ -157,7 +161,7 @@ function Workspace({ data, reload }: { data: Ready; reload: () => void }) {
 
   const startExport = async () => {
     setExportErr("");
-    try { setExportId((await api<{ id: number }>(`/api/clips/${clip.id}/export`, project)).id); } catch (e) { setExportErr((e as Error).message); }
+    try { const id = (await api<{ id: number }>(`/api/clips/${clip.id}/export`, project)).id; setExportId(id); setTermId(id); } catch (e) { setExportErr((e as Error).message); }
   };
   useEffect(() => { if (job?.status === "done") reload(); }, [job?.status]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!project) return null;
@@ -218,15 +222,17 @@ function Workspace({ data, reload }: { data: Ready; reload: () => void }) {
         </section>
 
         <aside className="overflow-y-auto border-t border-line p-5 lg:border-l lg:border-t-0" aria-label="Düzenleme ayarları">
-          <Inspector project={project} edit={edit} hasAudio={source.audio} clipId={clip.id} now={time - project.trim.in} selText={selText} onSelText={setSelText} />
+          <Inspector project={project} edit={edit} hasAudio={source.audio} clipId={clip.id} now={time - project.trim.in} selText={selText} onSelText={setSelText} onJob={setTermId} />
           <p className="mt-6 text-xs leading-relaxed text-mute">
             Boşluk: oynat/duraklat · ← → : 0,1 sn (⇧ ile 1 sn) · I / O: başlangıç / bitiş · ⌘Z: geri al
           </p>
         </aside>
       </div>
 
+      {termId != null && <Terminal logs={term.logs} running={term.status === "running" || term.status === "waiting"} jobId={termId} />}
+
       {(job || exportErr) && (
-        <div role="status" className="fixed inset-x-0 bottom-4 z-40 mx-auto w-[min(26rem,92vw)] rounded-2xl border border-line bg-raised p-4 shadow-lift">
+        <div role="status" className="fixed inset-x-0 bottom-16 z-40 mx-auto w-[min(26rem,92vw)] rounded-2xl border border-line bg-raised p-4 shadow-lift">
           {exportErr ? <p className="text-sm text-danger">{exportErr}</p> : busy ? (
             <>
               <p className="text-sm font-semibold">Dışa aktarılıyor… <span className="tnum font-normal text-ink-2">%{Math.round((job!.frac ?? 0) * 100)}</span></p>
@@ -252,14 +258,46 @@ function Workspace({ data, reload }: { data: Ready; reload: () => void }) {
   );
 }
 
+/* ---------------------------------------------------------------- camera search */
+function FacePanel({ clipId, split, edit, onJob }: { clipId: number; split: number; edit: (fn: (p: Project) => Project, key?: string) => void; onJob: (id: number) => void }) {
+  const [available, setAvailable] = useState<boolean | null>(null);
+  const [jobId, setJobId] = useState<number | null>(null);
+  const [msg, setMsg] = useState("");
+  const job = useJobPoll(jobId);
+  useEffect(() => { api<{ available: boolean }>("/api/faces/status").then((r) => setAvailable(r.available)).catch(() => setAvailable(false)); }, []);
+  const apply = useCallback(async () => {
+    try {
+      const r = await api<{ layout: Project["layout"] }>(`/api/clips/${clipId}/face-layout?split=${split}`);
+      edit((p) => { p.layout = r.layout; return p; });
+      setMsg("Kamera bulundu, üst pencereye yerleştirildi. İstersen kaydırıp yakınlaştır.");
+    } catch { setMsg("Bu klipte sabit bir kamera yüzü bulunamadı. Pencereyi elle ayarlayabilirsin."); }
+  }, [clipId, split, edit]);
+  useEffect(() => { if (job?.status === "done") void apply(); else if (job && ["failed", "cancelled", "blocked"].includes(job.status)) setMsg(job.error || "Kamera aranamadı."); }, [job?.status]); // eslint-disable-line react-hooks/exhaustive-deps
+  const busy = !!job && (job.status === "running" || job.status === "queued");
+  const start = async () => {
+    setMsg("");
+    try { const id = (await api<{ id: number }>(`/api/clips/${clipId}/faces`, {})).id; setJobId(id); onJob(id); } catch (e) { setMsg((e as Error).message); }
+  };
+  if (available === false) return <p className="mt-3 text-xs text-mute">Kamerayı otomatik bulmak için OpenCV gerekli: <code>pip install -e ".[faces]"</code></p>;
+  return (
+    <div className="mt-3">
+      <button onClick={start} disabled={busy || available === null} className="rounded-full bg-lime px-4 py-2 text-sm font-semibold text-lime-ink active:scale-95 disabled:opacity-60">
+        {busy ? `Kamera aranıyor… %${Math.round((job?.frac ?? 0) * 100)}` : "Kamerayı bul, üste koy"}
+      </button>
+      {msg && <p role="status" className="mt-2 text-sm text-ink-2">{msg}</p>}
+    </div>
+  );
+}
+
 /* ---------------------------------------------------------------- inspector */
-function Inspector({ project, edit, hasAudio, clipId, now, selText, onSelText }: { project: Project; edit: (fn: (p: Project) => Project, key?: string) => void; hasAudio: boolean; clipId: number; now: number; selText: string | null; onSelText: (id: string | null) => void }) {
+function Inspector({ project, edit, hasAudio, clipId, now, selText, onSelText, onJob }: { project: Project; edit: (fn: (p: Project) => Project, key?: string) => void; hasAudio: boolean; clipId: number; now: number; selText: string | null; onSelText: (id: string | null) => void; onJob: (id: number) => void }) {
   const { mode, cells } = project.layout;
   const setMode = (m: Mode) => edit((p) => { p.layout.mode = m; return p; });
   const seg = "flex-1 rounded-full px-3 py-2 text-sm transition";
   const names: Record<Mode, string> = { blur: "Bulanık", crop: "Tek pencere", stack: "İki pencere" };
   const cellsShown = mode === "crop" ? [0] : mode === "stack" ? [0, 1] : [];
-  const label = (i: number) => (mode === "crop" ? "Pencere" : i === 0 ? "Üst pencere (oyun)" : "Alt pencere (kamera)");
+  const label = (i: number) => (mode === "crop" ? "Pencere" : i === 0 ? "Üst pencere" : "Alt pencere");
+  const split = project.layout.split ?? 0.5;
   return (
     <div className="flex flex-col gap-7">
       <section>
@@ -271,6 +309,24 @@ function Inspector({ project, edit, hasAudio, clipId, now, selText, onSelText }:
           ))}
         </div>
         {mode === "blur" && <p className="mt-3 text-sm text-ink-2">Görüntü ortada, arkası bulanık kopyasıyla dolar.</p>}
+        {mode === "stack" && (
+          <div className="mt-4">
+            <p className="text-sm font-medium">Üst / alt oranı</p>
+            <div role="radiogroup" aria-label="Üst ve alt pencere oranı" className="mt-2 grid grid-cols-5 gap-1">
+              {[0.3, 0.35, 0.4, 0.5, 0.6].map((v) => (
+                <button key={v} role="radio" aria-checked={Math.abs(split - v) < 0.005} onClick={() => edit((p) => { p.layout.split = v; return p; })}
+                  className={`rounded-xl border px-1 py-2 text-xs tnum transition ${Math.abs(split - v) < 0.005 ? "border-ink bg-ink font-semibold text-paper" : "border-line text-ink-2 hover:border-ink"}`}>
+                  %{Math.round(v * 100)}<br />%{Math.round((1 - v) * 100)}
+                </button>
+              ))}
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button onClick={() => edit((p) => { p.layout.cells = [p.layout.cells[1], p.layout.cells[0]]; return p; })}
+                className="rounded-full border border-line px-3 py-1.5 text-sm hover:border-ink">⇅ Pencereleri değiştir</button>
+            </div>
+            <FacePanel clipId={clipId} split={split} edit={edit} onJob={onJob} />
+          </div>
+        )}
         {cellsShown.map((i) => (
           <div key={i} className="mt-4">
             <div className="flex items-center justify-between">

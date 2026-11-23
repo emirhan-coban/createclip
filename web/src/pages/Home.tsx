@@ -7,6 +7,7 @@ import { Timeline } from "../components/Timeline";
 import { Steps } from "../components/Steps";
 import { Poster } from "../components/Poster";
 import { Burst } from "../components/Burst";
+import { Terminal } from "../components/Terminal";
 
 const URL_RE = /^https?:\/\/\S+$/i;
 const KEY = "kliparya.job";
@@ -133,9 +134,17 @@ function Run({ jobId, job, onReset, onRetry }: { jobId: number; job: ReturnType<
   const duration = job.activity?.duration ?? info?.duration ?? 0;
   const running = job.status === "running" || job.status === "waiting";
   const final = !!job.activity && !job.activity.partial;
-  const chatPhase = !!job.chat && !final && running;
+  const chatPhase = !!job.chat && !job.audio && !final && running;
   const scan = chatPhase && job.chat?.stage === "örnekleme" ? job.chat.frac : null;
   const [burst, setBurst] = useState(false);
+  const [tick, setTick] = useState(() => Date.now() / 1000);
+  useEffect(() => {                                   // one-second clock for the elapsed time while the job runs
+    if (!running) return;
+    const id = window.setInterval(() => setTick(Date.now() / 1000), 1000);
+    return () => window.clearInterval(id);
+  }, [running]);
+  const elapsed = running && job.startedAt ? Math.max(0, tick - job.startedAt) : 0;
+  const quiet = running && job.lastAt ? tick - job.lastAt : 0;        // seconds since the last progress event
   const was = useRef(job.status);
   useEffect(() => {
     if (was.current !== "done" && job.status === "done") { setBurst(true); const t = setTimeout(() => setBurst(false), 1400); return () => clearTimeout(t); }
@@ -156,7 +165,7 @@ function Run({ jobId, job, onReset, onRetry }: { jobId: number; job: ReturnType<
         <div className="min-w-0 flex-1">
           <p className="truncate text-lg font-semibold leading-tight">{info?.title ?? (failed ? "Yayın alınamadı" : "Yayın bulunuyor…")}</p>
           <p className="text-sm text-ink-2">
-            {info ? <>{info.channel} · <span className="tnum">{dur(info.duration)}</span></> : job.status === "waiting" ? "Sırada, önceki iş bitince başlar" : ""}
+            {info ? <>{info.channel} · <span className="tnum">{dur(info.duration)}</span>{elapsed > 3 && <> · geçen <span className="tnum">{dur(elapsed)}</span></>}</> : job.status === "waiting" ? "Sırada, önceki iş bitince başlar" : ""}
           </p>
         </div>
         {running ? (
@@ -167,7 +176,14 @@ function Run({ jobId, job, onReset, onRetry }: { jobId: number; job: ReturnType<
       </div>
 
       <div className="mt-10 grid gap-10 lg:grid-cols-[17rem_1fr]">
-        <Steps job={job} />
+        <div>
+          <Steps job={job} />
+          {quiet > 45 && (
+            <p role="status" className="mt-5 text-xs leading-relaxed text-ink-2">
+              Bu adım uzun yayınlarda birkaç dakika sürebilir. Son güncellemeden bu yana {dur(quiet)} geçti; işlem çalışıyor, istersen Durdur ile iptal edebilirsin.
+            </p>
+          )}
+        </div>
         <div className="relative min-w-0">
           {duration > 1 && <Timeline duration={duration} blank={!job.activity} values={job.activity?.values} scan={scan} shimmer={chatPhase && job.chat?.stage !== "örnekleme"}
             moments={ordered} clips={job.clips} />}
@@ -219,6 +235,7 @@ function Run({ jobId, job, onReset, onRetry }: { jobId: number; job: ReturnType<
           </div>
         </section>
       )}
+      <Terminal logs={job.logs} running={running} jobId={jobId} />
     </div>
   );
 }

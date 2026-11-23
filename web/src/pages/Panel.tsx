@@ -159,7 +159,7 @@ function Settings({ s, refresh }: { s: State; refresh: () => void }) {
     setTimeout(() => setMsg(null), 3500);
   };
   const field = "w-full rounded-xl border border-line bg-raised px-3 py-2.5 outline-none focus:border-ink";
-  const num = (k: "clips_per_video" | "min_len" | "max_len" | "lead" | "skip_start_min", label: string, hint?: string) => (
+  const num = (k: "clips_per_video" | "min_len" | "max_len" | "lead" | "skip_start_min" | "keep_source_days" | "stall_min", label: string, hint?: string) => (
     <label className="block">
       <span className="text-sm text-ink-2">{label}</span>
       <input type="number" value={f[k]} onChange={(e) => set(k, Number(e.target.value))} className={`${field} tnum mt-1`} />
@@ -177,7 +177,7 @@ function Settings({ s, refresh }: { s: State; refresh: () => void }) {
             <option value="auto">Otomatik (sohbet, olmazsa ses)</option>
             <option value="chat">Sohbet yoğunluğu</option>
             <option value="audio">Ses yüksekliği</option>
-            <option value="transcript">Konuşma metni (ClipsAI, kurulu olmalı)</option>
+            <option value="transcript">Konuşma metni (ClipsAI, deneysel, kurulu olmalı)</option>
           </select>
         </label>
         {num("clips_per_video", "Yayın başına klip", "1–20")}
@@ -185,6 +185,31 @@ function Settings({ s, refresh }: { s: State; refresh: () => void }) {
         {num("min_len", "En kısa klip (sn)")}
         {num("max_len", "En uzun klip (sn)")}
         {num("lead", "Zirveden kaç sn önce başlasın")}
+        <label className="block">
+          <span className="text-sm text-ink-2">Yeni kliplerin yerleşimi</span>
+          <select value={f.layout} onChange={(e) => set("layout", e.target.value as Config["layout"])} className={`${field} mt-1`}>
+            <option value="blur">Bulanık arka plan</option>
+            <option value="face">Kamera üstte, oyun altta</option>
+          </select>
+          <span className="mt-1 block text-xs text-mute">Kamera yüzü bulunamazsa bulanık yerleşim kullanılır.</span>
+        </label>
+        <label className="block">
+          <span className="text-sm text-ink-2">Kamera penceresi yüksekliği</span>
+          <select value={String(f.split)} onChange={(e) => set("split", Number(e.target.value))} className={`${field} mt-1`}>
+            {[0.5, 0.4, 0.35, 0.3].map((v) => <option key={v} value={v}>%{Math.round(v * 100)} kamera · %{Math.round((1 - v) * 100)} oyun</option>)}
+          </select>
+        </label>
+        <label className="block sm:col-span-2">
+          <span className="text-sm text-ink-2">Konuşmaya göre kesim</span>
+          <select value={String(f.smart_cut)} onChange={(e) => set("smart_cut", e.target.value === "auto" ? "auto" : e.target.value === "true")} className={`${field} mt-1`}>
+            <option value="auto">Otomatik (Whisper modeli indirilmişse)</option>
+            <option value="true">Açık</option>
+            <option value="false">Kapalı (yalnızca zirve anına göre)</option>
+          </select>
+          <span className="mt-1 block text-xs text-mute">Klibin cümle ortasında başlayıp bitmesini önler; başlık ve etiketleri konuşmadan çıkarır. Klip başına yarım dakika kadar ekler.</span>
+        </label>
+        {num("keep_source_days", "Kaynak görüntü kaç gün saklansın", "Düzenlenmiş klipler hariç; 0 = silme")}
+        {num("stall_min", "Kaç dk ilerleme yoksa iş durdurulsun", "0 = hiç durdurma")}
         <label className="block">
           <span className="text-sm text-ink-2">Etiketler</span>
           <input value={f.hashtags} onChange={(e) => set("hashtags", e.target.value)} className={`${field} mt-1`} placeholder="#shorts #oyun" />

@@ -13,6 +13,7 @@ from autoshorts.sources import peaks
 @pytest.fixture
 def env(tmp_path):
     config.configure(tmp_path)
+    (tmp_path / "autoshorts.json").write_text('{"smart_cut": false}')          # no Whisper in the default tests
     con = store.connect()
     yield tmp_path, con
     con.close()
@@ -37,6 +38,7 @@ def test_make_clip_marks_done_and_saves(env, monkeypatch):
     tmp_path, con = env
     from autoshorts import finder
     monkeypatch.setattr(download, "fetch_range", lambda url, s, e, out, h: (out.parent.mkdir(parents=True, exist_ok=True), out.write_bytes(b"raw"), out)[-1])
+    monkeypatch.setattr(pipeline.editor, "source_info", lambda c: {"width": 640, "height": 360, "duration": 400.0, "audio": True, "start_time": 0.0})
     monkeypatch.setattr(pipeline.render, "vertical", lambda raw, off, ln, out: out.write_bytes(b"vid") or out)
     monkeypatch.setattr(pipeline.render, "thumbnail", lambda v, o, at=1.0: o.write_bytes(b"j") or o)
     video = download.Video("https://kick.com/a/videos/x", "Big stream", 3600.0, "kick", "a")
@@ -238,6 +240,7 @@ def test_pipeline_reports_progress_in_order(env, monkeypatch):
         return [finder.Moment(100, 150, 3.0, "chat"), finder.Moment(400, 450, 2.0, "chat")]
     monkeypatch.setattr(finder, "find", fake_find)
     monkeypatch.setattr(download, "fetch_range", lambda url, s, e, out, h: (out.parent.mkdir(parents=True, exist_ok=True), out.write_bytes(b"r"), out)[-1])
+    monkeypatch.setattr(pipeline.editor, "source_info", lambda c: {"width": 640, "height": 360, "duration": 400.0, "audio": True, "start_time": 0.0})
     monkeypatch.setattr(pipeline.render, "vertical", lambda raw, off, ln, out: out.write_bytes(b"v") or out)
     monkeypatch.setattr(pipeline.render, "thumbnail", lambda v, o, at=1.0: o.write_bytes(b"j") or o)
     ticks = []
@@ -285,10 +288,11 @@ def test_api_events_stream_replays_and_ends(api, monkeypatch):
     with client.stream("GET", f"/api/jobs/{jid}/events") as r:
         body = "".join(r.iter_text())
     evs = [json.loads(l[6:]) for l in body.splitlines() if l.startswith("data: ")]
-    assert [e["kind"] for e in evs] == ["info", "moments", "end"] and evs[-1]["status"] == "done"
-    with client.stream("GET", f"/api/jobs/{jid}/events?after=0") as r:        # reconnect: resumes after event 0
+    assert [e["kind"] for e in evs if e["kind"] != "log"] == ["info", "moments", "end"] and evs[-1]["status"] == "done"
+    first = next(e["i"] for e in evs if e["kind"] == "info")
+    with client.stream("GET", f"/api/jobs/{jid}/events?after={first}") as r:       # reconnect: resumes after that event
         again = [json.loads(l[6:]) for l in "".join(r.iter_text()).splitlines() if l.startswith("data: ")]
-    assert [e["kind"] for e in again] == ["moments", "end"]
+    assert [e["kind"] for e in again if e["kind"] != "log"] == ["moments", "end"]
 
 
 def test_api_config_validation_and_job_history(api, monkeypatch):
@@ -636,3 +640,204 @@ def test_api_rejects_bad_input_with_clear_errors(api, monkeypatch):
     # a valid run still queues (pipeline stubbed so no network)
     monkeypatch.setattr(pipeline, "process_video", lambda *a, **k: [])
     assert client.post("/api/run", content=json.dumps({**ok, "n": 5, "start_min": 10, "engine": "weird"}), headers=H).status_code == 200
+
+
+# ---------------------------------------------------------------- long steps report progress
+def test_loudness_reports_progress_and_audio_fallback_emits_events(env, monkeypatch):
+    from autoshorts import finder
+    from autoshorts.sources import kick
+    tmp_path, con = env
+    media = _make_source(tmp_path / "m.mp4")
+    ticks = []
+    vals = finder.loudness_series(media, duration=8.0, progress=ticks.append)
+    assert len(vals) >= 1 and ticks and ticks == sorted(ticks) and 0 < ticks[-1] <= 0.99
+
+    video = download.Video("https://www.youtube.com/watch?v=abcdefghijk", "V", 3600.0, "youtube", "c")
+    monkeypatch.setattr(finder, "by_chat", lambda *a, **k: (_ for _ in ()).throw(finder.FinderError("Sohbet tekrarı yok")))
+    monkeypatch.setattr(download, "fetch_audio", lambda url, out, progress=None: (progress and progress(0.5, "%50"), media)[1])
+    monkeypatch.setattr(finder, "loudness_series", lambda m, duration=0.0, progress=None: ([0.1] * 300 + [0.9] * 5 + [0.1] * 60))
+    events = []
+    found = finder.find(video, {**config.load(), "skip_start_min": 0}, tmp_path / "cache", 1, None,
+                        lambda f, t="": None, lambda kind, **d: events.append((kind, d)))
+    kinds = [k for k, _ in events]
+    assert "fallback" in kinds and "audio" in kinds and kinds[-1] == "activity"            # the UI hears about the switch
+    assert [d["phase"] for k, d in events if k == "audio"][:1] == ["download"] and any(d["phase"] == "measure" for k, d in events if k == "audio")
+    assert found and found[0].engine == "audio"
+    assert kick  # imported to make sure the source package still loads
+
+
+def test_youtube_chat_download_streams_progress(env, monkeypatch):
+    from autoshorts.sources import youtube
+    tmp_path, con = env
+    seen = []
+
+    def fake_run(cmd, what, timeout=None, on_line=None):
+        import subprocess
+        for line in ("[download] Downloading subtitles: live_chat", "[download]  12.5% of ~ 1.2MiB (frag 3/24)", "[download]  80.0% of ~ 1.2MiB (frag 20/24)"):
+            on_line(line)
+            monkeypatch.setattr("time.time", lambda c=iter(range(1000, 2000, 5)): next(c))     # every line looks >0.7 s apart
+        return subprocess.CompletedProcess(cmd, 1, "", "")
+    monkeypatch.setattr(youtube, "run", fake_run)
+    vod = youtube.Vod("abcdefghijk", "c", "t", 600.0, 0, 0, "https://www.youtube.com/watch?v=abcdefghijk")
+    with pytest.raises(youtube.YouTubeError):                    # no replay file was produced: the usual "no chat replay" case
+        youtube.fetch_chat(vod, tmp_path / "c", progress=lambda f, n, s="": seen.append((f, s)))
+    assert seen[0] == (0.0, "sohbet tekrarı indiriliyor") and any(abs(f - 0.125) < 1e-9 for f, _ in seen)
+
+
+def test_job_terminal_log_events(api, monkeypatch):
+    client, app, con, tmp_path = api
+    from autoshorts import proc
+
+    def fake(con_, cfg, url, n, at, engine, say, progress=None, emit=None):
+        say("Video bilgisi alınıyor")
+        proc.run(["sh", "-c", "echo hi"], "deneme komutu")
+        proc.run(["sh", "-c", "echo boom >&2; exit 3"], "bozuk komut")
+        progress(0.1, "Sohbet indiriliyor: örnekleme %10 · 5 mesaj")
+        progress(0.2, "Sohbet indiriliyor: örnekleme %20 · 9 mesaj")        # same step, <8 s later: not logged again
+        progress(0.5, "Klip 1/5 · indiriliyor")
+        return []
+    monkeypatch.setattr(pipeline, "process_video", fake)
+    jid = client.post("/api/run", json={"url": "https://kick.com/a/videos/x"}).json()["id"]
+    with client.stream("GET", f"/api/jobs/{jid}/events") as r:
+        body = "".join(r.iter_text())
+    evs = [json.loads(l[6:]) for l in body.splitlines() if l.startswith("data: ")]
+    logs = [(e["level"], e["text"]) for e in evs if e["kind"] == "log"]
+    levels = [lv for lv, _ in logs]
+    assert levels[0] == "info" and "başladı" in logs[0][1] and levels[-1] == "ok"
+    assert ("info", "Video bilgisi alınıyor") in logs
+    assert any(lv == "cmd" and t.startswith("$ sh -c") for lv, t in logs)
+    assert any(lv == "ok" and "deneme komutu" in t for lv, t in logs)
+    assert any(lv == "warn" and "bozuk komut" in t and "boom" in t and "3" in t for lv, t in logs)
+    steps = [t for lv, t in logs if lv == "step"]
+    assert steps == ["Sohbet indiriliyor: örnekleme %10 · 5 mesaj", "Klip 1/5 · indiriliyor"]
+    assert proc._hook is None                                                # the hook never outlives the job
+
+
+def test_job_terminal_marks_failure_and_cancel(api, monkeypatch):
+    client, app, con, tmp_path = api
+
+    def boom(*a, **k):
+        raise RuntimeError("bir şey patladı")
+    monkeypatch.setattr(pipeline, "process_video", boom)
+    jid = client.post("/api/run", json={"url": "https://kick.com/a/videos/x"}).json()["id"]
+    with client.stream("GET", f"/api/jobs/{jid}/events") as r:
+        body = "".join(r.iter_text())
+    logs = [(e["level"], e["text"]) for e in (json.loads(l[6:]) for l in body.splitlines() if l.startswith("data: ")) if e["kind"] == "log"]
+    assert logs[-1] == ("err", "✗ hata: bir şey patladı")
+
+
+# ---------------------------------------------------------------- speech-aware cuts, titles, face layout
+WORDS = [{"word": w, "start": 100 + i * 0.4, "end": 100 + i * 0.4 + 0.3} for i, w in enumerate(
+    "Bu oyunu ilk kez oynuyorum. Rakip bana saldırdı ve ben hemen kaçtım! Sonra herkes bağırmaya başladı, inanılmaz bir an. "
+    "Şimdi devam edelim mi?".split())]
+
+
+def test_speech_snap_title_and_keywords():
+    from autoshorts import speech
+    sent = speech.sentences(WORDS)
+    assert len(sent) == 4 and sent[0]["text"].endswith("oynuyorum.")
+    # a cut that starts mid-sentence is moved to the sentence start, one that ends mid-sentence to the sentence end
+    a, b = speech.snap(WORDS, WORDS[2]["start"], WORDS[12]["end"], min_len=3, max_len=60)
+    assert abs(a - (sent[0]["start"] - 0.15)) < 0.01 and abs(b - (sent[1]["end"] + 0.3)) < 0.01
+    # nothing said near the edges: unchanged
+    assert speech.snap([], 10, 40, min_len=5, max_len=60) == (10, 40)
+    assert speech.density(WORDS, 100, 110) > 1.5
+    t = speech.title(WORDS)
+    assert t and t[0].isupper() and len(t) <= 71
+    assert speech.keywords([{"word": w, "start": 0, "end": 1} for w in "oyun oyun oyun kaçtım kaçtım ve bu".split()]) == ["oyun", "kaçtım"]
+    m = meta.make("Uzun yayın başlığı", "kanal", "https://kick.com/a/videos/x", 100, {"hashtags": ["#shorts"], "credit": True}, WORDS)
+    assert m["title"] == t and "#shorts" in m["description"]
+
+
+def test_dedupe_uses_the_original_start(env):
+    _, con = env
+    cid = store.add_clip(con, "https://kick.com/a/videos/x", 100, 150, 3.0, "chat")
+    store.update_clip(con, cid, start=97.4, end=152.0)                      # snapped to a sentence
+    assert store.add_clip(con, "https://kick.com/a/videos/x", 100, 150, 3.0, "chat") is None
+    assert store.find_clip(con, "https://kick.com/a/videos/x", 100)["id"] == cid
+
+
+def test_split_layout_geometry_and_clean_project():
+    from autoshorts import editor
+    assert editor.stack_heights(0.5) == (960, 960) and editor.stack_heights(0.4) == (768, 1152)
+    assert editor.stack_heights(0.1) == (480, 1440)                          # clamped to 25 %
+    g = editor.build_graph({"layout": {"mode": "stack", "split": 0.4, "cells": [{"cx": .5, "cy": .5, "zoom": 1}, {"cx": .5, "cy": .5, "zoom": 1}]}}, 1920, 1080)
+    assert "scale=1080:768" in g and "scale=1080:1152" in g
+    p = editor.clean_project({"trim": {"in": 0, "out": 5}, "layout": {"mode": "stack", "split": 0.9}}, 20.0)
+    assert p["layout"]["split"] == 0.75
+    assert editor.clean_project({"trim": {"in": 0, "out": 5}}, 20.0)["layout"]["split"] == 0.5
+
+
+def test_face_pick_and_cell():
+    from autoshorts import faces
+    cam = (0.85, 0.82, 0.1, 0.16)
+    per = [[cam, (0.3, 0.3, 0.05, 0.08)], [(0.851, 0.821, 0.1, 0.16)], [], [(0.849, 0.819, 0.1, 0.16)]]
+    f = faces.pick(per)
+    assert f and abs(f["cx"] - 0.85) < 0.01 and f["seen"] == 0.75
+    assert faces.pick([[(0.2, 0.2, .1, .1)], [(0.7, 0.7, .1, .1)], [], [], []]) is None      # never in the same place
+    cell = faces.face_cell(f, 1920, 1080, 1080, 768)
+    assert 1.0 < cell["zoom"] <= 8 and abs(cell["cx"] - 0.85) < 0.01
+
+
+def test_make_clip_snaps_cut_and_uses_face_layout(env, monkeypatch):
+    import subprocess
+    from autoshorts import editor, faces, finder
+    tmp_path, con = env
+    config.save({"smart_cut": True, "layout": "face", "split": 0.4, "min_len": 3, "max_len": 60, "source_pad": 10})
+
+    def fake_fetch(url, s, e, out, h):
+        out.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "testsrc=size=640x360:rate=30", "-f", "lavfi", "-i",
+                        "sine=frequency=440:sample_rate=48000", "-t", "30", "-pix_fmt", "yuv420p", "-c:v", "libx264", "-c:a", "aac", "-shortest", str(out)], check=True)
+        return out
+    monkeypatch.setattr(download, "fetch_range", fake_fetch)
+    words = [{"word": w, "start": 100 + i * 0.4, "end": 100 + i * 0.4 + 0.3} for i, w in enumerate(WORDS_TEXT.split())]
+    # source starts at stream second 90: words must sit inside the 30 s file, so shift them
+    words = [{**w, "start": w["start"] - 90 + 6, "end": w["end"] - 90 + 6} for w in words]
+    monkeypatch.setattr(pipeline.transcribe, "available", lambda: True)
+    monkeypatch.setattr(editor.transcribe, "transcribe_words", lambda src, lang="tr": words)
+    monkeypatch.setattr(faces, "available", lambda: True)
+    monkeypatch.setattr(faces, "detect", lambda src, dur: {"cx": 0.85, "cy": 0.8, "w": 0.1, "h": 0.16, "seen": 1.0})
+    video = download.Video("https://kick.com/a/videos/x", "Big stream", 3600.0, "kick", "a")
+    store.upsert_video(con, video.url, title=video.title)
+    m = finder.Moment(103.0, 118.0, 4.2, "chat")                    # starts mid-sentence
+    cid = store.add_clip(con, video.url, m.start, m.end, m.score, m.engine)
+    saved = pipeline.make_clip(con, config.load(), video, cid, m)
+    c = store.get_clip(con, cid)
+    assert c["status"] == "done" and saved.exists()
+    assert c["start"] != 103.0 and c["key_start"] == 103.0                                # snapped, dedupe key kept
+    assert c["title"] and c["title"][0].isupper() and "Big stream" not in c["title"]
+    proj = store.get_project(con, cid)
+    assert proj["layout"]["mode"] == "stack" and proj["layout"]["split"] == 0.4 and proj["layout"]["cells"][0]["zoom"] > 1
+    out = json.loads(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=width,height", "-of", "json", str(saved)], capture_output=True, text=True).stdout)
+    assert (out["streams"][0]["width"], out["streams"][0]["height"]) == (1080, 1920)
+    assert editor.saved_words(cid)                                                         # transcript kept for the caption panel
+
+
+WORDS_TEXT = ("Bu oyunu ilk kez oynuyorum. Rakip bana saldırdı ve ben hemen kaçtım! Sonra herkes bağırmaya başladı, inanılmaz bir an. "
+              "Şimdi devam edelim mi? Evet devam ediyoruz çünkü daha bitmedi.")
+
+
+def test_watchdog_stops_a_stalled_job(env, monkeypatch):
+    from autoshorts import jobs as jobsmod
+    config.save({"stall_min": 1})
+    monkeypatch.setattr(jobsmod.App, "WATCH_EVERY", 0.05)
+    monkeypatch.setattr(jobsmod.App, "WARN_AFTER", 0.0)
+    app = jobsmod.App()
+
+    def slow(con, cfg, url, *a, **k):
+        from autoshorts import proc
+        proc.run(["sleep", "30"], "slow")
+    monkeypatch.setattr(jobsmod.pipeline, "process_video", slow)
+    job = app.submit("run", url="https://kick.com/a/videos/x")
+    for _ in range(60):
+        if job["status"] == "running":
+            break
+        threading.Event().wait(0.05)
+    job["updated"] = job["run_started"] = job["run_started"] - 120               # pretend it has been silent for 2 minutes
+    for _ in range(100):
+        if job["status"] not in ("running", "queued"):
+            break
+        threading.Event().wait(0.05)
+    assert job["status"] == "failed" and "Takıldı" in job["error"]
+    assert any("ilerleme yok" in e.get("text", "") for e in job["events"])

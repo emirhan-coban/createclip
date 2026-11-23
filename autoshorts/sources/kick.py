@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import ytdlp
-from ..proc import check_cancel, run
+from ..proc import check_cancel, run, say
 
 UA = {"User-Agent": "Mozilla/5.0"}
 URL_RE = re.compile(r"kick\.com/([^/?#]+)/videos/([0-9a-fA-F-]{36})")
@@ -105,6 +105,18 @@ class Limiter:
 _limiter = Limiter()
 
 
+_stats = {"n": 0, "429": 0, "t": 0.0}
+
+
+def _report(throttled: bool = False):
+    """Kick requests are not run through proc.run: tell the terminal about them in a summary line every 10 s."""
+    _stats["n"] += 1
+    _stats["429"] += throttled
+    if time.time() - _stats["t"] >= 10:
+        _stats["t"] = time.time()
+        say("cmd", f"GET kick.com/api … · {_stats['n']} istek · {_stats['429']} hız sınırı (429) · {_limiter.rate:.1f} istek/sn")
+
+
 def _get(url: str, tries: int = 8):
     # curl, not urllib: Kick's edge answers curl in ~1 s but stalls Python's TLS client.
     last = None
@@ -117,6 +129,7 @@ def _get(url: str, tries: int = 8):
             if p.returncode != 0:
                 raise RuntimeError(f"curl exit {p.returncode}")
             body, _, code = p.stdout.rpartition("\n")
+            _report(code == "429")
             if code == "429":
                 _limiter.throttle(4 + 3 * i)
                 raise RuntimeError("429 (hız sınırı)")

@@ -14,7 +14,7 @@ export function Poster({ id, title, start, end, score, scale = 1, onOpen }: {
       onMouseLeave={() => { if (v.current) { v.current.pause(); v.current.currentTime = 0; } }}
       onFocus={() => { v.current?.play().catch(() => {}); }}
       onBlur={() => { v.current?.pause(); }}
-      className="group relative block shrink-0 overflow-hidden rounded-[22px] bg-ink text-left shadow-lift transition-transform duration-300 hover:-translate-y-1"
+      className="group relative block shrink-0 isolate overflow-hidden rounded-[22px] border-0 bg-black p-0 text-left shadow-lift transition-transform duration-300 hover:-translate-y-1"
       style={{ aspectRatio: "9 / 16", height: `${Math.round(340 * scale)}px` }}
       aria-label={title ? `Klibi aç: ${title}` : "Klibi aç"}
     >

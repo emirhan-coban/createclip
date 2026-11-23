@@ -2,6 +2,7 @@ import argparse
 import json
 import logging
 import shutil
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -39,6 +40,7 @@ def _parser() -> argparse.ArgumentParser:
     sv.add_argument("--port", type=int, default=8765)
     sv.add_argument("--open", action="store_true", help="tarayıcıyı aç")
     sub.add_parser("clips", help="üretilen klipler ve durumları")
+    sub.add_parser("build-ui", help="web arayüzünü derle ve pakete göm (npm gerekir)")
 
     c = sub.add_parser("config", help="ayar göster / değiştir: autoshorts config anahtar=değer")
     c.add_argument("pairs", nargs="*")
@@ -70,17 +72,34 @@ def main(argv=None) -> int:
         # optional parts: not errors, but say what is missing and how to get it
         import importlib.util
         from . import transcribe
-        dist = Path(__file__).resolve().parent.parent / "web" / "dist"        # not imported from api: FastAPI is optional
+        from . import faces
+        dist = config.ui_dist()                                               # not imported from api: FastAPI is optional
         opt = [("web arayüzü (FastAPI)", importlib.util.find_spec("fastapi") is not None and importlib.util.find_spec("uvicorn") is not None, "pip install -e '.'"),
                ("arayüz derlemesi", (dist / "index.html").exists(), "cd web && npm install && npm run build"),
                ("altyazı: Pillow", importlib.util.find_spec("PIL") is not None, "pip install -e '.[captions]'"),
                ("altyazı: mlx-whisper", transcribe.available(), "pip install -e '.[captions]'"),
-               ("altyazı: konuşma modeli", transcribe.cached(), "ilk altyazıda ~3 GB iner")]
+               ("altyazı: konuşma modeli", transcribe.cached(), "ilk altyazıda ~3 GB iner"),
+               ("kamera yüzü bulma: OpenCV", faces.available(), "pip install -e '.[faces]'"),
+               ("ClipsAI motoru (deneysel)", importlib.util.find_spec("clipsai") is not None, "isteğe bağlı: pip install -e '.[clipsai]'")]
         for name, ok, fix in opt:
             print(f"[{'ok' if ok else 'uyarı'}] {name}" + ("" if ok else f"  ({fix})"))
         free = shutil.disk_usage(config.root()).free / 1e9
         print(f"[{'ok' if free > 5 else 'uyarı'}] boş disk: {free:.0f} GB")
         return 1 if bad else 0
+
+    if a.cmd == "build-ui":
+        web = Path(__file__).resolve().parent.parent / "web"
+        if not (web / "package.json").exists():
+            print("web/ klasörü bulunamadı (yalnızca kaynak kopyasından derlenir).")
+            return 1
+        for cmd in (["npm", "install"], ["npm", "run", "build"]):
+            if subprocess.run(cmd, cwd=web).returncode:
+                return 1
+        target = Path(__file__).resolve().parent / "webdist"
+        shutil.rmtree(target, ignore_errors=True)
+        shutil.copytree(web / "dist", target)
+        print(f"arayüz paketlendi: {target}")
+        return 0
 
     if a.cmd == "run":
         if a.start:

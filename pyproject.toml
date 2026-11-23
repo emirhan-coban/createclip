@@ -11,6 +11,7 @@ dependencies = ["fastapi", "uvicorn"]     # the local web app; the machine also 
 
 [project.optional-dependencies]
 dev = ["pytest", "httpx"]
+faces = ["opencv-python-headless"]   # find the streamer's camera for the face-on-top layout
 captions = ["pillow", "mlx-whisper"]   # word-by-word captions: Whisper on Apple Silicon + Pillow
 clipsai = ["clipsai"]      # transcript-based finder (also needs whisperx; Python <= 3.12 recommended)
 
@@ -21,7 +22,7 @@ autoshorts = "autoshorts.cli:main"
 packages = ["autoshorts", "autoshorts.sources"]
 
 [tool.setuptools.package-data]
-autoshorts = ["fonts/*.ttf"]
+autoshorts = ["fonts/*.ttf", "webdist/**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

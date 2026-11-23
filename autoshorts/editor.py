@@ -11,11 +11,17 @@ import tempfile
 from array import array
 from pathlib import Path
 
-from . import captions, config, download, export, render, store, texts, transcribe
+from . import captions, config, download, export, faces, render, store, texts, transcribe
 from .proc import Cancelled, log, run, run_ok
 
 OW, OH = 1080, 1920
-ASPECT = {"crop": (9, 16), "stack": (9, 8)}          # window shape of one cell, per layout mode
+SPLIT_MIN, SPLIT_MAX = 0.25, 0.75
+
+
+def stack_heights(split: float) -> tuple[int, int]:
+    """Pixel heights of the top and bottom window of the two-window layout (even numbers; mirrored in layout.ts)."""
+    top = int(OH * min(SPLIT_MAX, max(SPLIT_MIN, split))) // 2 * 2
+    return top, OH - top
 
 
 def editor_dir(clip_id: int) -> Path:
@@ -30,7 +36,7 @@ def default_project(clip: dict) -> dict:
     s0 = float(clip["src_start"] or 0)
     return {"version": 1,
             "trim": {"in": round(float(clip["start"]) - s0, 2), "out": round(float(clip["end"]) - s0, 2)},
-            "layout": {"mode": "blur", "cells": [{"cx": 0.5, "cy": 0.5, "zoom": 1.0}, {"cx": 0.85, "cy": 0.8, "zoom": 3.0}]},
+            "layout": {"mode": "blur", "split": 0.5, "cells": [{"cx": 0.5, "cy": 0.5, "zoom": 1.0}, {"cx": 0.85, "cy": 0.8, "zoom": 3.0}]},
             "audio": {"volume": 1.0, "normalize": True},
             "captions": {"enabled": False, "words": [], "style": dict(captions.DEFAULT_STYLE)},
             "texts": []}
@@ -55,7 +61,8 @@ def clean_project(p: dict, duration: float) -> dict:
         cells.append({"cx": 0.5, "cy": 0.5, "zoom": 1.0})
     au = p.get("audio") or {}
     cap = p.get("captions") or {}
-    return {"version": 1, "trim": {"in": round(a, 2), "out": round(b, 2)}, "layout": {"mode": mode, "cells": cells},
+    split = round(min(SPLIT_MAX, max(SPLIT_MIN, float(lay.get("split", 0.5)))), 2)
+    return {"version": 1, "trim": {"in": round(a, 2), "out": round(b, 2)}, "layout": {"mode": mode, "split": split, "cells": cells},
             "audio": {"volume": min(3.0, max(0.0, float(au.get("volume", 1.0)))), "normalize": bool(au.get("normalize", True))},
             "captions": {"enabled": bool(cap.get("enabled", False)), "words": captions.clean_words(cap.get("words")),
                          "style": captions.clean_style(cap.get("style"))},
@@ -90,8 +97,9 @@ def build_graph(project: dict, W: int, H: int, out: str = "v") -> str:
     if mode == "crop":
         return f"[0:v]fps=30,{_crop(W, H, cells[0], 9, 16)},scale={OW}:{OH}[{out}]"
     if mode == "stack":
-        return (f"[0:v]fps=30,split[a][b];[a]{_crop(W, H, cells[0], 9, 8)},scale={OW}:{OH // 2}[t];"
-                f"[b]{_crop(W, H, cells[1], 9, 8)},scale={OW}:{OH // 2}[u];[t][u]vstack[{out}]")
+        th, bh = stack_heights(lay.get("split", 0.5))
+        return (f"[0:v]fps=30,split[a][b];[a]{_crop(W, H, cells[0], OW, th)},scale={OW}:{th}[t];"
+                f"[b]{_crop(W, H, cells[1], OW, bh)},scale={OW}:{bh}[u];[t][u]vstack[{out}]")
     g = render.GRAPH.format(W=OW, H=OH)
     return g[: g.rindex("[v]")] + f"[{out}]"
 
@@ -180,7 +188,7 @@ def ensure_source(con, cfg: dict, clip_id: int, progress=lambda f, t="": None) -
 def _forget_edit(con, clip_id: int):
     store.delete_project(con, clip_id)
     d = editor_dir(clip_id)
-    for name in ("strip.jpg", "strip.json", "wave.json", "probe.json", "words.json", "export.mp4", "export.jpg"):
+    for name in ("strip.jpg", "strip.json", "wave.json", "probe.json", "words.json", "face.json", "export.mp4", "export.jpg"):
         (d / name).unlink(missing_ok=True)
 
 
@@ -203,6 +211,46 @@ def clean_sources(con) -> dict:
             store.set_source(con, c["id"], None, None, None)
             _forget_edit(con, c["id"])
     return {"files": n, "bytes": freed}
+
+
+def clean_old_sources(con, days: float) -> dict:
+    """Delete source footage older than `days` days, but only of clips without a saved edit (an edit would be lost)."""
+    import time
+    freed = n = 0
+    if days <= 0:
+        return {"files": 0, "bytes": 0}
+    for c in store.clips(con):
+        f = Path(c["src_file"]) if c.get("src_file") else None
+        if not f or not f.exists() or time.time() - f.stat().st_mtime < days * 86400 or store.get_project(con, c["id"]):
+            continue
+        freed += f.stat().st_size
+        n += 1
+        f.unlink()
+        store.set_source(con, c["id"], None, None, None)
+        _forget_edit(con, c["id"])
+    return {"files": n, "bytes": freed}
+
+
+# ---------------------------------------------------------------- face layout
+def find_face(con, cfg: dict, clip_id: int, progress=lambda f, t="": None) -> dict | None:
+    """Look for the streamer's camera in the clip's source footage; the result is cached in face.json."""
+    clip = store.get_clip(con, clip_id)
+    src = source_path(clip)
+    if not src:
+        raise RuntimeError("Kaynak görüntü yok; önce indirilmeli.")
+    info = source_info(clip)
+    progress(0.1, "Kamera aranıyor")
+    face = faces.detect(src, info["duration"])
+    faces.save(editor_dir(clip_id) / "face.json", face)
+    return face
+
+
+def face_layout(face: dict, W: int, H: int, split: float, top: str = "face") -> dict:
+    """Two-window layout: the camera window on top (share `split` of the height) and the whole game view below."""
+    th, bh = stack_heights(split)
+    cam = faces.face_cell(face, W, H, OW, th)
+    game = {"cx": 0.5, "cy": 0.5, "zoom": 1.0}
+    return {"mode": "stack", "split": round(th / OH, 2), "cells": [cam, game] if top == "face" else [game, cam]}
 
 
 # ---------------------------------------------------------------- export

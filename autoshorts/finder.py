@@ -10,6 +10,7 @@ Engines
   auto        chat, and audio when the chat is unavailable.
 """
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -91,13 +92,21 @@ def by_chat(video: download.Video, cfg: dict, cache: Path, n: int, progress=_noo
 
 
 # ---------------------------------------------------------------- audio
-def loudness_series(media: Path, bin_sec: int = peaks.BIN) -> list[float]:
-    """Linear RMS per `bin_sec` window via ffmpeg astats."""
+def loudness_series(media: Path, bin_sec: int = peaks.BIN, duration: float = 0.0, progress=None) -> list[float]:
+    """Linear RMS per `bin_sec` window via ffmpeg astats. progress(fraction) follows ffmpeg's own clock when the
+    duration is known (a 5 hour stream takes a couple of minutes: the UI must not sit silent)."""
     sr = 16000
-    p = run(["ffmpeg", "-v", "error", "-i", str(media), "-vn", "-ac", "1", "-ar", str(sr), "-af",
+    last = [0.0]
+
+    def on_line(line: str):
+        m = re.match(r"out_time_(?:us|ms)=(\d+)", line)
+        if m and progress and duration and time.time() - last[0] > 0.7:
+            last[0] = time.time()
+            progress(min(0.99, int(m.group(1)) / 1e6 / duration))
+    p = run(["ffmpeg", "-v", "error", "-nostats", "-progress", "pipe:1", "-i", str(media), "-vn", "-ac", "1", "-ar", str(sr), "-af",
              f"asetnsamples=n={sr * bin_sec}:p=0,astats=metadata=1:reset=1,"
              "ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-", "-f", "null", "-"],
-            "loudness", timeout=3 * 3600)
+            "loudness", timeout=3 * 3600, on_line=on_line)
     vals = []
     for m in re.finditer(r"RMS_level=(-?inf|-?[0-9.]+)", p.stdout):
         db = -90.0 if "inf" in m.group(1) else float(m.group(1))
@@ -109,10 +118,19 @@ def loudness_series(media: Path, bin_sec: int = peaks.BIN) -> list[float]:
 
 def by_audio(video: download.Video, cfg: dict, cache: Path, n: int, progress=_noop, emit=_noop_emit) -> list[Moment]:
     progress(0.02, "Ses indiriliyor")
-    media = download.fetch_audio(video.url, cache / "audio.bin",
-                                 lambda f, t: progress(0.02 + 0.7 * f, f"Ses indiriliyor: {t}"))
-    progress(0.75, "Ses seviyesi ölçülüyor (uzun yayınlarda birkaç dakika sürebilir)")
-    raw = loudness_series(media)
+    emit("audio", phase="download", frac=0.0, text="Ses indiriliyor")
+
+    def dl(f, t):
+        progress(0.02 + 0.5 * f, f"Ses indiriliyor: {t}")
+        emit("audio", phase="download", frac=round(f, 3), text=f"Ses indiriliyor {t}")
+    media = download.fetch_audio(video.url, cache / "audio.bin", dl)
+    progress(0.55, "Ses seviyesi ölçülüyor (uzun yayınlarda birkaç dakika sürebilir)")
+    emit("audio", phase="measure", frac=0.0, text="Ses seviyesi ölçülüyor")
+
+    def meas(f):
+        progress(0.55 + 0.4 * f, f"Ses seviyesi ölçülüyor %{int(f * 100)}")
+        emit("audio", phase="measure", frac=round(f, 3), text=f"Ses seviyesi ölçülüyor %{int(f * 100)}")
+    raw = loudness_series(media, duration=video.duration, progress=meas)
     progress(0.97, "Zirveler aranıyor")
     emit("activity", source="audio", partial=False, bin_sec=peaks.BIN, duration=video.duration, messages=0,
          values=_series(peaks.smooth(raw)))
@@ -156,4 +174,5 @@ def find(video: download.Video, cfg: dict, cache: Path, n: int | None = None, en
     except (kick.KickError, FinderError, RuntimeError) as e:
         log.warning("chat unavailable (%s), using audio loudness", e)
         progress(0.0, f"Sohbet alınamadı ({str(e)[:80]}); ses seviyesine geçiliyor")
+        emit("fallback", reason=str(e)[:160])
     return by_audio(video, cfg, cache, n, progress, emit)
