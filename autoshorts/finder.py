@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import download
-from .proc import log, run
+from .proc import log, run, say
 from .sources import kick, peaks, youtube
 
 
@@ -80,6 +80,9 @@ def by_chat(video: download.Video, cfg: dict, cache: Path, n: int, progress=_noo
     else:
         raise FinderError("Sohbet yalnızca Kick ve YouTube için destekleniyor.")
     progress(0.97, f"{len(data.msgs)} mesaj çözümleniyor, zirveler aranıyor")
+    ignored, sample = peaks.spam_report(data.msgs)
+    if ignored >= 30:
+        say("warn", f"⚠ {ignored} tekrarlayan mesaj (çekiliş/komut) puana katılmadı: " + " · ".join(f"“{s}”" for s in sample))
     emit("activity", source="chat", partial=False, bin_sec=peaks.BIN, duration=video.duration, messages=len(data.msgs),
          values=_series(peaks.bin_scores(data.msgs, video.duration)))
     kw = _peak_kw(cfg)

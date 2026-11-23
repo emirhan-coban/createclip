@@ -841,3 +841,89 @@ def test_watchdog_stops_a_stalled_job(env, monkeypatch):
         threading.Event().wait(0.05)
     assert job["status"] == "failed" and "Takıldı" in job["error"]
     assert any("ilerleme yok" in e.get("text", "") for e in job["events"])
+
+
+# ---------------------------------------------------------------- giveaway spam and single clips
+def _chat(duration=7200, giveaway=(3000, 4200), real=(5500, 5530)):
+    import random
+    rnd = random.Random(1)
+    msgs = []
+    for t in range(0, duration, 3):                                   # steady ordinary chat: 1 message / 3 s
+        msgs.append({"t": t + rnd.random(), "u": f"u{rnd.randrange(80)}", "c": rnd.choice(["hadi", "güzel", "bu ne", "nasılsın", "iyi oyun"])})
+    for t in range(*giveaway):                                        # giveaway: 25 different people paste the same text every 10 s
+        for k in range(25 if t % 10 == 0 else 0):
+            msgs.append({"t": t + k * 0.3, "u": f"g{rnd.randrange(400)}", "c": "Katılıyorum çekilişe " + ("!" if k % 2 else "")})
+    for t in range(*real):                                            # a real reaction: many people, different words
+        for k in range(18 if t % 10 == 0 else 0):
+            msgs.append({"t": t + k * 0.4, "u": f"r{rnd.randrange(300)}", "c": f"vay be {rnd.choice('abcdefghij')}{rnd.randrange(999)} inanılmaz"})
+    return msgs
+
+
+def test_giveaway_spam_does_not_win_the_peaks():
+    msgs = _chat()
+    spam, _ = peaks.analyze(msgs)
+    assert any("katılıyorum çekilişe" in t for t in spam)
+    n, sample = peaks.spam_report(msgs)
+    assert n > 500 and "katılıyorum çekilişe" in sample[0]
+    found = peaks.find_peaks(msgs, 7200, n=10, skip_start=600)
+    assert found and found[0].time in range(5490, 5540)                # the real reaction ranks first
+    assert not [p for p in found if 3000 <= p.time <= 4200 and p.score > 3]
+    # same data without the filter would pick the giveaway: prove the filter is what changed the outcome
+    assert peaks.weight({"t": 3010, "c": "!katil", "u": "x"}, set(), set()) == 0.0
+    assert peaks.weight({"t": 5, "c": "ahahahaha", "u": "x"}, {"ahahahaha"}, set()) == 0.0   # explicit spam still muted
+    assert not peaks.LAUGH.match("katılıyorum") and peaks.LAUGH.match("ahahaha") and peaks.LAUGH.match("kkkkk")
+
+
+def test_peaks_are_spread_out():
+    scores = [1.0] * 720
+    for i in range(300, 360):                                          # one hour-long... ten-minute hot region
+        scores[i] = 10.0 + (i % 7)
+    out = peaks.peaks_from_scores(scores, 7200, n=10, skip_start=0)
+    assert 0 < len(out) <= 6 and all(sum(1 for q in out if a <= q.time < a + 600) <= 3 for a in range(0, 7200, 30))
+
+
+def test_manual_cut_is_not_snapped(env, monkeypatch):
+    from autoshorts import finder
+    config.save({"smart_cut": True, "min_len": 3, "max_len": 60})
+    monkeypatch.setattr(pipeline.transcribe, "available", lambda: True)
+    words = [{"word": "Merhaba.", "start": 1.0, "end": 1.5}, {"word": "Bugün", "start": 2.0, "end": 2.3}, {"word": "güzel.", "start": 2.4, "end": 2.9}]
+    monkeypatch.setattr(pipeline.editor, "transcribe_source", lambda con, cfg, cid, progress=None: words)
+    monkeypatch.setattr(download, "fetch_range", lambda url, s, e, out, h: (out.parent.mkdir(parents=True, exist_ok=True), out.write_bytes(b"r"), out)[-1])
+    monkeypatch.setattr(pipeline.editor, "source_info", lambda c: {"width": 640, "height": 360, "duration": 60.0, "audio": True, "start_time": 0.0})
+    monkeypatch.setattr(pipeline.render, "vertical", lambda raw, off, ln, out: out.write_bytes(b"v") or out)
+    monkeypatch.setattr(pipeline.render, "thumbnail", lambda v, o, at=1.0: o.write_bytes(b"j") or o)
+    _, con = env
+    video = download.Video("https://kick.com/a/videos/x", "Big", 3600.0, "kick", "a")
+    store.upsert_video(con, video.url, title="Big")
+    m = finder.Moment(1000.0, 1010.0, 0.0, "manual")
+    cid = store.add_clip(con, video.url, m.start, m.end, 0.0, "manual")
+    pipeline.make_clip(con, config.load(), video, cid, m)
+    c = store.get_clip(con, cid)
+    assert (c["start"], c["end"]) == (1000.0, 1010.0)
+
+
+def test_random_mashing_hype_is_still_a_moment():
+    """Everybody typing different gibberish at once (or one short shout) is a reaction, not spam."""
+    import random
+    rnd = random.Random(5)
+    msgs = []
+    for t in range(0, 7200, 3):
+        msgs.append({"t": t + rnd.random(), "u": f"u{rnd.randrange(80)}", "c": rnd.choice(["hadi", "güzel", "bu ne", "nasılsın"])})
+    letters = "abcdefghıijklmnoprstuvyz"
+    for t in range(2000, 2060, 10):                               # a minute of keyboard mashing, different text every time
+        for k in range(40):
+            msgs.append({"t": t + k * 0.2, "u": f"m{rnd.randrange(500)}", "c": "".join(rnd.choice(letters) for _ in range(rnd.randrange(3, 15)))})
+    for t in range(5000, 5600, 10):                               # a ten minute hype wave, also random
+        for k in range(30):
+            msgs.append({"t": t + k * 0.3, "u": f"h{rnd.randrange(500)}", "c": "".join(rnd.choice(letters) for _ in range(rnd.randrange(3, 15)))})
+    for t in range(6000, 6180, 10):                               # three minutes of one short shout: GOL
+        for k in range(25):
+            msgs.append({"t": t + k * 0.4, "u": f"s{rnd.randrange(500)}", "c": "GOL"})
+    spam, local = peaks.analyze(msgs)
+    assert not spam and not local                                  # nothing here is a giveaway
+    found = peaks.find_peaks(msgs, 7200, n=10, skip_start=600)
+    times = [p.time for p in found]
+    assert any(1990 <= t <= 2070 for t in times) and any(5000 <= t <= 5600 for t in times) and any(6000 <= t <= 6180 for t in times)
+    # ... while a long pasted sentence over many minutes is still caught
+    pasted = [{"t": t + k * 0.4, "u": f"p{rnd.randrange(900)}", "c": "çekilişe katılıyorum"} for t in range(3000, 3600, 10) for k in range(25)]
+    assert "çekilişe katılıyorum" in peaks.analyze(msgs + pasted)[0]

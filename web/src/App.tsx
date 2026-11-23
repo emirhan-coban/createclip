@@ -4,6 +4,7 @@ import { Wordmark } from "./components/Wordmark";
 import Home from "./pages/Home";
 import Panel from "./pages/Panel";
 import Editor from "./pages/Editor";
+import Single from "./pages/Single";
 
 function Bar() {
   const l = ({ isActive }: { isActive: boolean }) => `rounded-full px-4 py-2 text-[0.95rem] transition ${isActive ? "font-semibold" : "text-ink-2 hover:text-ink"}`;
@@ -13,6 +14,7 @@ function Bar() {
         <Link to="/" aria-label="Kliparya ana sayfa"><Wordmark /></Link>
         <nav className="flex items-center gap-1" aria-label="Ana menü">
           <NavLink to="/" end className={l}>Yeni klip</NavLink>
+          <NavLink to="/tekli" className={l}>Tekli klip</NavLink>
           <NavLink to="/panel" className={l}>Panel</NavLink>
         </nav>
       </div>
@@ -31,6 +33,7 @@ export default function App() {
         <Chrome />
         <Routes>
           <Route path="/" element={<Home />} />
+          <Route path="/tekli" element={<Single />} />
           <Route path="/panel/*" element={<Panel />} />
           <Route path="/editor/:id" element={<Editor />} />
         </Routes>

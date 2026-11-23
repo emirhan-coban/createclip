@@ -147,7 +147,7 @@ def make_clip(con, cfg: dict, video: download.Video, clip_id: int, m: finder.Mom
         except Exception as e:  # noqa: BLE001 - speech is a bonus: the clip is still made from the peak
             log.warning("clip %s: speech analysis skipped: %s", clip_id, e)
             words = []
-    if words:
+    if words and m.engine != "manual":            # times typed by the user stay exactly as typed
         a, b = speech.snap(words, cs - start, ce - start, min_len=cfg["min_len"], max_len=cfg["max_len"])
         cs, ce = start + max(0.0, a), start + min(info["duration"], b)
         if (cs, ce) != (m.start, m.end):
