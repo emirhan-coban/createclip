@@ -18,6 +18,20 @@ the a an and or but to of in on is are was were it this that i you we they he sh
 """.split())
 
 
+def clean_words(words, limit: int = 1500) -> list[dict]:
+    """Whisper words as plain {word, start, end}: empty ones dropped, times sane and sorted."""
+    out = []
+    for w in (words or [])[:limit]:
+        text = str(w.get("word", "")).strip()[:40]
+        if not text:
+            continue
+        s = max(0.0, float(w["start"]))
+        e = max(s + 0.02, float(w["end"]))
+        out.append({"word": text, "start": round(s, 3), "end": round(e, 3)})
+    out.sort(key=lambda w: w["start"])
+    return out
+
+
 def sentences(words: list[dict]) -> list[dict]:
     """Group words into sentences: {start, end, text, words}. A sentence ends at ./?/! or after a pause."""
     out, cur = [], []

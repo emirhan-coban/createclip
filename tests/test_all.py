@@ -457,97 +457,6 @@ def test_storage_usage_and_clean(env):
     assert editor.storage_usage(con) == {"files": 0, "bytes": 0}
 
 
-# ---------------------------------------------------------------- captions
-def test_caption_states_sequential_and_synced():
-    from autoshorts import captions
-    words = [{"word": "bir", "start": 1.0, "end": 1.4}, {"word": "iki", "start": 1.3, "end": 1.9},     # overlapping ASR times
-             {"word": "üç.", "start": 2.0, "end": 2.5}, {"word": "dört", "start": 4.0, "end": 4.4}]
-    st = captions.build_states(words, 3, 0.0)
-    assert [s[2] for s in st] == [0, 1, 2, 0]                       # active word index inside each chunk
-    for a, b in zip(st, st[1:]):
-        assert a[1] <= b[0] + 1e-9 and a[0] < a[1]                  # strictly sequential: no drift can accumulate
-    shifted = captions.build_states(words, 3, -0.08)
-    assert abs(shifted[0][0] - 0.92) < 1e-9
-    assert captions.tr_upper("ığdır iş") == "IĞDIR İŞ" and captions.mask_word("amk") == "a**"
-
-
-def test_caption_style_and_words_are_cleaned():
-    from autoshorts import captions
-    s = captions.clean_style({"size": 9, "ypos": -1, "chunk": 99, "font": "poppins", "color": "#ABCDEF"})
-    assert s["size"] == 0.16 and s["ypos"] == 0.02 and s["chunk"] == 6 and s["active"] == "#FFDD00"
-    for bad in ({"font": "comic"}, {"color": "red"}):
-        with pytest.raises(ValueError):
-            captions.clean_style(bad)
-    w = captions.clean_words([{"word": "  b ", "start": 2, "end": 1}, {"word": "", "start": 0, "end": 1}, {"word": "a", "start": 1, "end": 1.5}])
-    assert [x["word"] for x in w] == ["a", "b"] and w[1]["end"] > w[1]["start"]
-
-
-def test_export_burns_captions_in_the_right_place(env):
-    import subprocess
-    from PIL import Image, ImageChops
-    from autoshorts import editor
-    tmp_path, con = env
-    src = _make_source(tmp_path / "data" / "clips" / "source" / "1.mp4")
-    store.upsert_video(con, "https://kick.com/a/videos/x", title="V")
-    cid = store.add_clip(con, "https://kick.com/a/videos/x", 101, 107, 3.0, "chat")
-    f = tmp_path / "ready" / "d" / "a_1.mp4"
-    f.parent.mkdir(parents=True)
-    f.write_bytes(b"x")
-    store.update_clip(con, cid, file=str(f), title="T", description="D", status="done")
-    store.set_source(con, cid, str(src), 100.0, 108.0)
-    base = editor.default_project(store.get_clip(con, cid))
-    base["trim"] = {"in": 1.0, "out": 6.0}
-    base["audio"]["normalize"] = False
-    words = [{"word": "MERHABA", "start": 2.0, "end": 2.6}, {"word": "DÜNYA", "start": 2.6, "end": 3.4}]    # source seconds
-    def frame(path, t, out):
-        subprocess.run(["ffmpeg", "-y", "-v", "error", "-ss", str(t), "-i", str(path), "-frames:v", "1", str(out)], check=True)
-        return Image.open(out).convert("RGB")
-
-    def changed(a, b):
-        return ImageChops.difference(a, b).convert("L").point(lambda v: 255 if v > 40 else 0).getbbox()
-    # every export of the same cut writes the same file name, so grab the frames before the next export
-    plain = editor.export_clip(con, config.load(), cid, base)
-    p_on, p_off = frame(plain, 1.5, tmp_path / "p.png"), frame(plain, 4.5, tmp_path / "p2.png")
-    caps = {"enabled": True, "words": words, "style": {"ypos": 0.62}}
-    with_caps = editor.export_clip(con, config.load(), cid, {**base, "captions": caps})
-    c_on, c_off = frame(with_caps, 1.5, tmp_path / "c.png"), frame(with_caps, 4.5, tmp_path / "c2.png")
-    box = changed(p_on, c_on)          # clip time 1.5 s == source 2.5 s: a caption is on screen
-    assert box and 0.55 * 1920 < box[1] and box[3] < 0.75 * 1920 and box[0] > 40 and box[2] < 1040      # band around ypos 0.62, inside the frame
-    assert changed(p_off, c_off) is None                                     # 4.5 s: no words, frames identical
-    off = editor.export_clip(con, config.load(), cid, {**base, "captions": {**caps, "enabled": False}})
-    assert changed(p_on, frame(off, 1.5, tmp_path / "o.png")) is None        # captions off -> same as plain
-
-
-def test_api_captions_endpoints(api, monkeypatch):
-    client, app, con, tmp_path = api
-    from autoshorts import transcribe
-    src = _make_source(tmp_path / "data" / "clips" / "source" / "1.mp4")
-    store.upsert_video(con, "https://kick.com/a/videos/x", title="V")
-    cid = store.add_clip(con, "https://kick.com/a/videos/x", 101, 106, 3.0, "chat")
-    f = tmp_path / "ready" / "d" / "c.mp4"
-    f.parent.mkdir(parents=True)
-    f.write_bytes(b"x")
-    store.update_clip(con, cid, file=str(f), title="T", status="done")
-    assert client.post(f"/api/clips/{cid}/transcribe", json={}).status_code == 409           # no source yet
-    store.set_source(con, cid, str(src), 100.0, 108.0)
-    monkeypatch.setattr(transcribe, "available", lambda: True)
-    monkeypatch.setattr(transcribe, "transcribe_words", lambda media, language="tr": [{"word": "selam", "start": 1.0, "end": 1.4}])
-    st = client.get("/api/captions/status").json()
-    assert st["available"] is True and isinstance(st["cached"], bool)
-    jid = client.post(f"/api/clips/{cid}/transcribe", json={}).json()["id"]
-    for _ in range(100):
-        j = next(x for x in app.jobs if x["id"] == jid)
-        if j["status"] in ("done", "failed"):
-            break
-        threading.Event().wait(0.05)
-    assert j["status"] == "done", j.get("error")
-    assert client.get(f"/api/clips/{cid}/words").json()["words"] == [{"word": "selam", "start": 1.0, "end": 1.4}]
-    monkeypatch.setattr(transcribe, "available", lambda: False)
-    assert client.post(f"/api/clips/{cid}/transcribe", json={}).status_code == 409
-    r = client.get(f"/api/clips/{cid}/editor").json()
-    assert r["project"]["captions"] == {"enabled": False, "words": [], "style": r["project"]["captions"]["style"]}
-
-
 def test_source_with_timestamp_offset_is_normalized_to_zero(env):
     import subprocess
     from autoshorts import editor
@@ -811,7 +720,6 @@ def test_make_clip_snaps_cut_and_uses_face_layout(env, monkeypatch):
     assert proj["layout"]["mode"] == "stack" and proj["layout"]["split"] == 0.4 and proj["layout"]["cells"][0]["zoom"] > 1
     out = json.loads(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=width,height", "-of", "json", str(saved)], capture_output=True, text=True).stdout)
     assert (out["streams"][0]["width"], out["streams"][0]["height"]) == (1080, 1920)
-    assert editor.saved_words(cid)                                                         # transcript kept for the caption panel
 
 
 WORDS_TEXT = ("Bu oyunu ilk kez oynuyorum. Rakip bana saldırdı ve ben hemen kaçtım! Sonra herkes bağırmaya başladı, inanılmaz bir an. "
@@ -927,3 +835,51 @@ def test_random_mashing_hype_is_still_a_moment():
     # ... while a long pasted sentence over many minutes is still caught
     pasted = [{"t": t + k * 0.4, "u": f"p{rnd.randrange(900)}", "c": "çekilişe katılıyorum"} for t in range(3000, 3600, 10) for k in range(25)]
     assert "çekilişe katılıyorum" in peaks.analyze(msgs + pasted)[0]
+
+
+# ---------------------------------------------------------------- power profile
+def test_power_profile_arguments(monkeypatch):
+    from autoshorts import power, proc
+    try:
+        monkeypatch.setattr(power, "has_videotoolbox", lambda: True)
+        power.apply({"power": "eco"})
+        assert power.mode() == "eco" and proc._nice == power.NICE
+        assert "h264_videotoolbox" in power.video_args() and "-threads" in power.input_args()
+        assert power.filter_args()[0] == "-filter_threads"
+        monkeypatch.setattr(power, "has_videotoolbox", lambda: False)      # no hardware encoder: x264 with limited threads
+        a = power.video_args()
+        assert "libx264" in a and a[a.index("-threads") + 1] == str(power.THREADS)
+        power.apply({"power": "normal"})
+        assert proc._nice == 0 and power.input_args() == [] and power.filter_args() == []
+        assert "-threads" not in power.video_args() and "libx264" in power.video_args()
+    finally:
+        power.apply({"power": "eco"})
+        proc.set_nice(0)
+
+
+def test_children_run_at_lower_priority():
+    import subprocess
+    from autoshorts import proc
+    proc.set_nice(7)
+    try:
+        p = proc.run(["sh", "-c", "ps -o ni= -p $$"], "ni")
+        assert int(p.stdout.strip()) >= 7
+    finally:
+        proc.set_nice(0)
+
+
+def test_blur_graph_is_small_and_whisper_runs_in_a_child(monkeypatch, tmp_path):
+    from autoshorts import render, transcribe
+    g = render.graph()
+    assert "scale=135:240" in g and "boxblur=6:3" in g and g.endswith("[v]")          # blur at 1/8 size
+    monkeypatch.setattr(transcribe, "available", lambda: True)
+    seen = {}
+
+    def fake_run(cmd, what, timeout=None, on_line=None):
+        import subprocess
+        seen["cmd"] = cmd
+        Path(cmd[-1]).write_text('[{"word": "selam", "start": 0.1, "end": 0.4}]')
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+    monkeypatch.setattr(transcribe, "run", fake_run)
+    words = transcribe.transcribe_words(tmp_path / "a.mp4", "tr")
+    assert words[0]["word"] == "selam" and seen["cmd"][1:3] == ["-m", "autoshorts.transcribe"]

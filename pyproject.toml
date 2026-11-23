@@ -10,9 +10,10 @@ requires-python = ">=3.10"
 dependencies = ["fastapi", "uvicorn"]     # the local web app; the machine also needs ffmpeg and yt-dlp
 
 [project.optional-dependencies]
-dev = ["pytest", "httpx"]
+dev = ["pytest", "httpx", "pillow"]
 faces = ["opencv-python-headless"]   # find the streamer's camera for the face-on-top layout
-captions = ["pillow", "mlx-whisper"]   # word-by-word captions: Whisper on Apple Silicon + Pillow
+editor = ["pillow"]          # text layers in the clip editor
+speech = ["mlx-whisper"]     # sentence-aware cuts and speech titles: Whisper on Apple Silicon
 clipsai = ["clipsai"]      # transcript-based finder (also needs whisperx; Python <= 3.12 recommended)
 
 [project.scripts]

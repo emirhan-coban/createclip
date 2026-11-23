@@ -7,7 +7,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import config, download, pipeline, store
+from . import config, download, pipeline, power, store
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -61,6 +61,7 @@ def main(argv=None) -> int:
     config.configure(a.root)
     logging.basicConfig(level=logging.DEBUG if a.verbose else logging.ERROR, format="%(asctime)s %(levelname)s %(message)s")
     cfg, con = config.load(), store.connect()
+    power.apply(cfg)
 
     if a.cmd == "doctor":
         bad = 0
@@ -76,9 +77,9 @@ def main(argv=None) -> int:
         dist = config.ui_dist()                                               # not imported from api: FastAPI is optional
         opt = [("web arayüzü (FastAPI)", importlib.util.find_spec("fastapi") is not None and importlib.util.find_spec("uvicorn") is not None, "pip install -e '.'"),
                ("arayüz derlemesi", (dist / "index.html").exists(), "cd web && npm install && npm run build"),
-               ("altyazı: Pillow", importlib.util.find_spec("PIL") is not None, "pip install -e '.[captions]'"),
-               ("altyazı: mlx-whisper", transcribe.available(), "pip install -e '.[captions]'"),
-               ("altyazı: konuşma modeli", transcribe.cached(), "ilk altyazıda ~3 GB iner"),
+               ("metin katmanı: Pillow", importlib.util.find_spec("PIL") is not None, "pip install -e '.[editor]'"),
+               ("konuşmaya göre kesim: mlx-whisper", transcribe.available(), "pip install -e '.[speech]'"),
+               ("konuşmaya göre kesim: Whisper modeli", transcribe.cached(), "ilk kullanımda ~3 GB iner"),
                ("kamera yüzü bulma: OpenCV", faces.available(), "pip install -e '.[faces]'"),
                ("ClipsAI motoru (deneysel)", importlib.util.find_spec("clipsai") is not None, "isteğe bağlı: pip install -e '.[clipsai]'")]
         for name, ok, fix in opt:

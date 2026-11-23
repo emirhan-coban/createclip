@@ -8,7 +8,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
-from .captions import FONT_DIR, FONTS, _rgba
+from .fonts import FONT_DIR, FONTS, rgba as _rgba
 
 OW, OH = 1080, 1920
 EMOJI_FONT = "/System/Library/Fonts/Apple Color Emoji.ttc"

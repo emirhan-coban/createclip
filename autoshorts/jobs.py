@@ -5,7 +5,7 @@ import re
 import threading
 import time
 
-from . import config, download, editor, pipeline, proc, store
+from . import config, download, editor, pipeline, power, proc, store
 from .proc import log
 
 
@@ -125,6 +125,7 @@ class App:
             try:
                 con = store.connect()
                 cfg = config.load()
+                power.apply(cfg)
                 if job["kind"] == "run":
                     cfg["skip_start_min"] = job.get("start_min") or 0
                     cfg["max_len"] = job.get("max_len") or cfg["max_len"]
@@ -138,9 +139,6 @@ class App:
                 elif job["kind"] == "faces":                       # editor: find the camera for the two-window layout
                     face = editor.find_face(con, cfg, job["clip_id"], prog)
                     say("Kamera bulundu" if face else "Kamera bulunamadı")
-                elif job["kind"] == "transcribe":                  # editor: speech to text for captions
-                    words = editor.transcribe_source(con, cfg, job["clip_id"], prog)
-                    say(f"{len(words)} kelime")
                 elif job["kind"] == "export":                      # editor: render the edit
                     saved = editor.export_clip(con, cfg, job["clip_id"], job["project"], prog)
                     emit("exported", id=job["clip_id"], file=saved.name)

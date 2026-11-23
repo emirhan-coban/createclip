@@ -200,6 +200,14 @@ function Settings({ s, refresh }: { s: State; refresh: () => void }) {
           </select>
         </label>
         <label className="block sm:col-span-2">
+          <span className="text-sm text-ink-2">Bilgisayar gücü</span>
+          <select value={f.power} onChange={(e) => set("power", e.target.value as Config["power"])} className={`${field} mt-1`}>
+            <option value="eco">Tasarruf: bilgisayarı yavaşlatmaz (donanım kodlayıcı, 2 iş parçacığı, düşük öncelik)</option>
+            <option value="normal">Tam hız: tüm çekirdekler, en küçük dosya</option>
+          </select>
+          <span className="mt-1 block text-xs text-mute">Tasarruf modunda aynı iş yaklaşık aynı sürede biter (boş bilgisayarda), ama diğer uygulamalara öncelik verir ve çok daha az işlemci kullanır. Mac dışında donanım kodlayıcı yoksa x264 kullanılır.</span>
+        </label>
+        <label className="block sm:col-span-2">
           <span className="text-sm text-ink-2">Konuşmaya göre kesim</span>
           <select value={String(f.smart_cut)} onChange={(e) => set("smart_cut", e.target.value === "auto" ? "auto" : e.target.value === "true")} className={`${field} mt-1`}>
             <option value="auto">Otomatik (Whisper modeli indirilmişse)</option>

@@ -6,6 +6,7 @@ practice with a stalled Kick HLS download)."""
 import logging
 import os
 import shlex
+import shutil
 import signal
 import subprocess
 import threading
@@ -19,7 +20,13 @@ class Cancelled(Exception):
     (e.g. chat -> audio) must not swallow it."""
 
 
+_nice = 0               # niceness for every child process (set by power.apply)
 _hook = None            # callable(level, text) set by the job runner: the UI's terminal shows every command we run
+
+
+def set_nice(n: int):
+    global _nice
+    _nice = max(0, int(n))
 
 
 def set_log_hook(fn):
@@ -77,7 +84,10 @@ def run(cmd: list, what: str, timeout: float | None = None, on_line=None) -> sub
     t0 = time.time()
     log.debug("%s: %s", what, " ".join(str(c) for c in cmd)[:300])
     _say("cmd", "$ " + " ".join(shlex.quote(str(c)) for c in cmd)[:260])
-    proc = subprocess.Popen([str(c) for c in cmd], stdout=subprocess.PIPE,
+    argv = [str(c) for c in cmd]
+    if _nice and os.name == "posix" and shutil.which("nice"):
+        argv = ["nice", "-n", str(_nice)] + argv            # runs after the user's own apps when the machine is busy
+    proc = subprocess.Popen(argv, stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT if on_line else subprocess.PIPE, text=True, start_new_session=True)
     with _lock:
         _procs.add(proc)

@@ -1,5 +1,5 @@
 import { useRef } from "react";
-import { FONTS, type FontKey } from "../../lib/captions";
+import { FONTS, type FontKey } from "../../lib/fonts";
 import type { Project } from "../../lib/layout";
 import { EMOJI_PALETTE, newText, type TextLayer } from "../../lib/texts";
 

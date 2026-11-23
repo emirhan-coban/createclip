@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, dur, friendlyError, type Clip } from "../lib/api";
-import { defaultCaptions } from "../lib/captions";
 import { useJobPoll } from "../lib/useJobPoll";
 import { useJob } from "../lib/useJob";
 import { Terminal } from "../components/Terminal";
@@ -9,8 +8,6 @@ import { OW, OH, type Mode, type Project } from "../lib/layout";
 import { useProject } from "../lib/useProject";
 import { Stage } from "../components/editor/Stage";
 import { EditTimeline } from "../components/editor/EditTimeline";
-import { CaptionLayer } from "../components/editor/CaptionLayer";
-import { CaptionPanel } from "../components/editor/CaptionPanel";
 import { TextLayer } from "../components/editor/TextLayer";
 import { TextPanel } from "../components/editor/TextPanel";
 
@@ -75,8 +72,8 @@ function GetSource({ clip, onReady }: { clip: Clip; onReady: () => void }) {
 /* ---------------------------------------------------------------- the editor */
 function Workspace({ data, reload }: { data: Ready; reload: () => void }) {
   const { clip, source } = data;
-  // projects saved before captions existed have no captions block
-  const initial = useMemo(() => ({ ...data.project, layout: { ...data.project.layout, split: data.project.layout.split ?? 0.5 }, captions: data.project.captions ?? defaultCaptions(), texts: data.project.texts ?? [] }), [data.project]);
+  // older projects lack some blocks (layout split, text layers; captions were removed): fill in what is missing
+  const initial = useMemo(() => ({ ...data.project, layout: { ...data.project.layout, split: data.project.layout.split ?? 0.5 }, texts: data.project.texts ?? [] }), [data.project]);
   const { project, edit, undo, redo, canUndo, canRedo, saving } = useProject(clip.id, initial);
   const [assets, setAssets] = useState<Assets | null>(null);
   const [master, setMaster] = useState<HTMLVideoElement | null>(null);
@@ -186,7 +183,6 @@ function Workspace({ data, reload }: { data: Ready; reload: () => void }) {
               <Stage project={project} src={`/media/source/${clip.id}.mp4`} W={source.width} H={source.height} onMaster={onMaster} onPan={pan}>
                 {(scale: number) => (
                   <>
-                    <CaptionLayer captions={project.captions} time={time} trim={project.trim} />
                     <TextLayer layers={project.texts} time={time - project.trim.in} selected={selText} scale={scale} onSelect={setSelText}
                       onMove={(id, x, y) => edit((p) => { const l = p.texts.find((t) => t.id === id); if (l) { l.x = x; l.y = y; } return p; }, `text-move-${id}`)} />
                   </>
@@ -352,8 +348,6 @@ function Inspector({ project, edit, hasAudio, clipId, now, selText, onSelText, o
         ))}
         {cellsShown.length > 0 && <p className="mt-3 text-sm text-ink-2">Önizlemede sürükleyerek kaydır.</p>}
       </section>
-
-      <CaptionPanel clipId={clipId} project={project} edit={edit} />
 
       <TextPanel project={project} edit={edit} now={now} selected={selText} onSelect={onSelText} />
 

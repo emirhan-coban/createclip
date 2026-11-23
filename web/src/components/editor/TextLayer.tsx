@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { FONTS } from "../../lib/captions";
+import { FONTS } from "../../lib/fonts";
 import { OH, OW, drawText, geometry, type TextLayer as Layer } from "../../lib/texts";
 
 /** Text overlay of the preview: all visible layers on one canvas, plus a draggable box around the selected one. */

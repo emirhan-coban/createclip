@@ -11,7 +11,7 @@ import tempfile
 from array import array
 from pathlib import Path
 
-from . import captions, config, download, export, faces, render, store, texts, transcribe
+from . import config, download, export, faces, power, render, speech, store, texts, transcribe
 from .proc import Cancelled, log, run, run_ok
 
 OW, OH = 1080, 1920
@@ -38,7 +38,6 @@ def default_project(clip: dict) -> dict:
             "trim": {"in": round(float(clip["start"]) - s0, 2), "out": round(float(clip["end"]) - s0, 2)},
             "layout": {"mode": "blur", "split": 0.5, "cells": [{"cx": 0.5, "cy": 0.5, "zoom": 1.0}, {"cx": 0.85, "cy": 0.8, "zoom": 3.0}]},
             "audio": {"volume": 1.0, "normalize": True},
-            "captions": {"enabled": False, "words": [], "style": dict(captions.DEFAULT_STYLE)},
             "texts": []}
 
 
@@ -60,12 +59,9 @@ def clean_project(p: dict, duration: float) -> dict:
     while len(cells) < 2:
         cells.append({"cx": 0.5, "cy": 0.5, "zoom": 1.0})
     au = p.get("audio") or {}
-    cap = p.get("captions") or {}
     split = round(min(SPLIT_MAX, max(SPLIT_MIN, float(lay.get("split", 0.5)))), 2)
     return {"version": 1, "trim": {"in": round(a, 2), "out": round(b, 2)}, "layout": {"mode": mode, "split": split, "cells": cells},
             "audio": {"volume": min(3.0, max(0.0, float(au.get("volume", 1.0)))), "normalize": bool(au.get("normalize", True))},
-            "captions": {"enabled": bool(cap.get("enabled", False)), "words": captions.clean_words(cap.get("words")),
-                         "style": captions.clean_style(cap.get("style"))},
             "texts": texts.clean_layers(p.get("texts"))}
 
 
@@ -100,7 +96,7 @@ def build_graph(project: dict, W: int, H: int, out: str = "v") -> str:
         th, bh = stack_heights(lay.get("split", 0.5))
         return (f"[0:v]fps=30,split[a][b];[a]{_crop(W, H, cells[0], OW, th)},scale={OW}:{th}[t];"
                 f"[b]{_crop(W, H, cells[1], OW, bh)},scale={OW}:{bh}[u];[t][u]vstack[{out}]")
-    g = render.GRAPH.format(W=OW, H=OH)
+    g = render.graph(OW, OH)
     return g[: g.rindex("[v]")] + f"[{out}]"
 
 
@@ -263,10 +259,6 @@ def render_project(src: Path, project: dict, out: Path, info: dict, progress=lam
         af.append(f"volume={vol:.3f}")
     if project["audio"]["normalize"]:
         af.append("loudnorm=I=-16:TP=-1.5:LRA=11")
-    cap = project.get("captions") or {}
-    # caption words that fall inside the cut, on the clip's own timeline
-    words = [{"word": w["word"], "start": max(0.0, w["start"] - t_in), "end": min(length, w["end"] - t_in)}
-             for w in cap.get("words", []) if w["end"] > t_in and w["start"] < t_out] if cap.get("enabled") else []
 
     def on_line(line: str):
         m = re.match(r"out_time_(?:us|ms)=(\d+)", line)
@@ -274,27 +266,21 @@ def render_project(src: Path, project: dict, out: Path, info: dict, progress=lam
             progress(min(0.99, int(m.group(1)) / 1e6 / length), "Videoya işleniyor")
     out.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory() as td:
-        prep = captions.prepare(Path(td), words, cap["style"], length) if words else None
         layers = texts.render_layers(Path(td), project.get("texts"), length)
-        cmd = ["ffmpeg", "-y", "-v", "error", "-nostats", "-progress", "pipe:1", "-ss", f"{t_in:.3f}", "-t", f"{length:.3f}", "-i", str(src)]
-        # overlays are chained on the laid-out video: captions first, then text layers (on top), the last one is [v]
-        n_over = (1 if prep else 0) + len(layers)
+        cmd = ["ffmpeg", "-y", "-v", "error", "-nostats", "-progress", "pipe:1", *power.input_args(), "-ss", f"{t_in:.3f}", "-t", f"{length:.3f}", "-i", str(src)]
+        # text layers are chained on the laid-out video, the last overlay's output is [v]
+        n_over = len(layers)
         label = lambda k: "v" if k == n_over else f"l{k}"           # noqa: E731
         graph = build_graph(project, info["width"], info["height"], label(0))
         step, idx = 0, 1
-        if prep:
-            lst, y0 = prep
-            cmd += ["-f", "concat", "-safe", "0", "-i", str(lst)]
-            graph += f";[{idx}:v]fps=30,format=rgba[cap];[{label(step)}][cap]overlay=0:{y0}:shortest=1:format=auto[{label(step + 1)}]"
-            step, idx = step + 1, idx + 1
         for png, x, y, a, b in layers:
             cmd += ["-loop", "1", "-t", f"{length:.3f}", "-i", str(png)]
             graph += f";[{label(step)}][{idx}:v]overlay={x}:{y}:enable='between(t,{a:.3f},{b:.3f})':shortest=1:format=auto[{label(step + 1)}]"
             step, idx = step + 1, idx + 1
-        cmd += ["-filter_complex", graph, "-map", "[v]"]
+        cmd += [*power.filter_args(), "-filter_complex", graph, "-map", "[v]"]
         if info["audio"]:
             cmd += ["-map", "0:a?"] + (["-af", ",".join(af)] if af else []) + ["-ar", "48000", "-c:a", "aac", "-b:a", "128k"]
-        cmd += ["-t", f"{length:.3f}", "-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(out)]
+        cmd += ["-t", f"{length:.3f}", *power.video_args(), "-movflags", "+faststart", str(out)]
         p = run(cmd, "editor render", timeout=3600, on_line=on_line)
     if p.returncode:
         raise RuntimeError("Dışa aktarma başarısız: " + p.stdout.strip()[-300:])
@@ -338,21 +324,14 @@ def _archive(old: Path):
             shutil.move(str(f), str(dest / f.name))
 
 
-def saved_words(clip_id: int) -> list[dict]:
-    f = editor_dir(clip_id) / "words.json"
-    return json.loads(f.read_text()) if f.exists() else []
-
-
 def transcribe_source(con, cfg: dict, clip_id: int, progress=lambda f, t="": None) -> list[dict]:
-    """Speech-to-text for the whole source file (word times in source seconds); cached for the editor."""
+    """Speech-to-text for the whole source file (word times in source seconds), for sentence-aware cuts and titles."""
     clip = store.get_clip(con, clip_id)
     src = source_path(clip)
     if not src:
         raise RuntimeError("Kaynak görüntü yok; önce indirilmeli.")
     progress(0.1, "Konuşma çözülüyor (genellikle yarım dakika)")
-    words = captions.clean_words(transcribe.transcribe_words(src, cfg.get("language", "tr")))
-    (editor_dir(clip_id) / "words.json").write_text(json.dumps(words, ensure_ascii=False))
-    return words
+    return speech.clean_words(transcribe.transcribe_words(src, cfg.get("language", "tr")))
 
 
 def source_info(clip: dict) -> dict | None:

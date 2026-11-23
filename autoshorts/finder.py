@@ -14,7 +14,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import download
+from . import download, power
 from .proc import log, run, say
 from .sources import kick, peaks, youtube
 
@@ -106,7 +106,7 @@ def loudness_series(media: Path, bin_sec: int = peaks.BIN, duration: float = 0.0
         if m and progress and duration and time.time() - last[0] > 0.7:
             last[0] = time.time()
             progress(min(0.99, int(m.group(1)) / 1e6 / duration))
-    p = run(["ffmpeg", "-v", "error", "-nostats", "-progress", "pipe:1", "-i", str(media), "-vn", "-ac", "1", "-ar", str(sr), "-af",
+    p = run(["ffmpeg", "-v", "error", "-nostats", "-progress", "pipe:1", *power.input_args(), "-i", str(media), "-vn", "-ac", "1", "-ar", str(sr), "-af",
              f"asetnsamples=n={sr * bin_sec}:p=0,astats=metadata=1:reset=1,"
              "ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-", "-f", "null", "-"],
             "loudness", timeout=3 * 3600, on_line=on_line)

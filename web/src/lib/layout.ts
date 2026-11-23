@@ -1,6 +1,5 @@
 // Layout geometry shared by the preview (CSS) and the export (ffmpeg, autoshorts/editor.py). Keep both in step:
 // the same window maths, the same 1080x1920 canvas.
-import { defaultCaptions, type Captions } from "./captions";
 import type { TextLayer } from "./texts";
 
 export const OW = 1080;
@@ -13,7 +12,6 @@ export type Project = {
   trim: { in: number; out: number };
   layout: { mode: Mode; split: number; cells: Cell[] };   // split: share of the height of the top window (stack)
   audio: { volume: number; normalize: boolean };
-  captions: Captions;
   texts: TextLayer[];
 };
 export type Box = { x: number; y: number; w: number; h: number };
@@ -76,6 +74,5 @@ export const defaultProject = (dur: number): Project => ({
   version: 1, trim: { in: 0, out: dur },
   layout: { mode: "blur", split: 0.5, cells: [{ cx: 0.5, cy: 0.5, zoom: 1 }, { cx: 0.85, cy: 0.8, zoom: 3 }] },
   audio: { volume: 1, normalize: true },
-  captions: defaultCaptions(),
   texts: [],
 });

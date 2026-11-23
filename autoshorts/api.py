@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import config, download, editor, faces, store, transcribe
+from . import config, download, editor, faces, store
 from .jobs import App
 
 def _clip_json(c: dict) -> dict:
@@ -89,7 +89,7 @@ EDITABLE = {"engine": _engine, "clips_per_video": _num(1, 20, int), "min_len": _
             "lead": _num(0, 60, int), "language": lambda v: _lang(v), "skip_start_min": _num(0, 600), "output_dir": _dir, "hashtags": _tags,
             "credit": lambda v: bool(v), "smart_cut": lambda v: _choice(v, ("auto", True, False)),
             "layout": lambda v: _choice(v, ("blur", "face")), "split": _num(0.25, 0.75), "keep_source_days": _num(0, 365, int),
-            "stall_min": _num(0, 240, int)}
+            "stall_min": _num(0, 240, int), "power": lambda v: _choice(v, ("eco", "normal"))}
 
 
 @contextlib.contextmanager
@@ -360,24 +360,6 @@ def create_app(jobs: App | None = None) -> FastAPI:
         if not info or not face:
             raise HTTPException(404, "Kamera bulunamadı")
         return {"face": face, "layout": editor.face_layout(face, info["width"], info["height"], split, "game" if top == "game" else "face")}
-
-    @app.get("/api/captions/status")
-    def captions_status():
-        return {"available": transcribe.available(), "cached": transcribe.cached()}
-
-    @app.get("/api/clips/{cid}/words")
-    def words(cid: int):
-        clip_row(cid)
-        return {"words": editor.saved_words(cid)}
-
-    @app.post("/api/clips/{cid}/transcribe")
-    async def start_transcribe(cid: int):
-        c = clip_row(cid)
-        if not editor.source_path(c):
-            raise HTTPException(409, "Kaynak görüntü yok")
-        if not transcribe.available():
-            raise HTTPException(409, "Altyazı için mlx-whisper gerekli: ./.venv/bin/pip install -e '.[captions]'")
-        return {"id": jobs.submit("transcribe", clip_id=cid)["id"]}
 
     @app.post("/api/clips/{cid}/source")
     async def fetch_source(cid: int):

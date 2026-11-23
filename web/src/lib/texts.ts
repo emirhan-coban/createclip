@@ -1,6 +1,6 @@
 // Text layers: same wrapping, block geometry and baselines as autoshorts/texts.py (Pillow). Times are seconds from the
 // clip's start. Change both files together.
-import { FONTS, type FontKey } from "./captions";
+import { FONTS, type FontKey } from "./fonts";
 
 export type TextLayer = {
   id: string; text: string; start: number; end: number; x: number; y: number; size: number;

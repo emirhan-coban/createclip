@@ -80,7 +80,7 @@ body {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
 
-/* Caption fonts: the same files the exporter draws with (variable weights for Montserrat and Gabarito). */
+/* Text-layer fonts: the same files the exporter draws with (variable weights for Montserrat and Gabarito). */
 @font-face { font-family: "KMontserrat"; src: url("/fonts/Montserrat.ttf"); font-weight: 100 900; font-display: block; }
 @font-face { font-family: "KGabarito"; src: url("/fonts/Gabarito.ttf"); font-weight: 100 900; font-display: block; }
 @font-face { font-family: "KPoppins"; src: url("/fonts/Poppins-Bold.ttf"); font-weight: 700; font-display: block; }
