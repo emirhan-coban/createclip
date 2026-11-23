@@ -13,11 +13,9 @@ DEFAULTS = {
     "max_height": 1080,
     "source_pad": 30,          # seconds of extra footage kept around every clip so the editor can extend the cut
     "output_dir": "ready",     # finished clips are saved here (relative to the working folder), one subfolder per day
-    "language": "tr",          # spoken language of the streams (Whisper), for speech-aware cuts
     "hashtags": ["#shorts"],
     "credit": True,            # put the source link in the description file
     "watch_every_min": 60,
-    "smart_cut": "auto",       # snap cuts to sentence boundaries + title from speech (Whisper): auto = when the model is on disk
     "layout": "blur",          # layout of new clips: blur (blurred background) | face (camera on top, game below)
     "split": 0.4,              # face layout: share of the height given to the camera window (0.25-0.75)
     "keep_source_days": 14,    # source footage of clips with no saved edit is deleted after N days (0 = keep)

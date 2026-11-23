@@ -58,13 +58,6 @@ def _choice(v, allowed):
     return v
 
 
-def _lang(v):
-    v = str(v).strip().lower()
-    if not re.fullmatch(r"[a-z]{2,3}", v):
-        raise ValueError("iki-üç harfli dil kodu olmalı (tr, en…)")
-    return v
-
-
 def _text(v):
     v = str(v).strip()
     if not v or len(v) > 300:
@@ -86,8 +79,8 @@ def _tags(v):
 
 
 EDITABLE = {"engine": _engine, "clips_per_video": _num(1, 20, int), "min_len": _num(10, 120, int), "max_len": _num(15, 180, int),
-            "lead": _num(0, 60, int), "language": lambda v: _lang(v), "skip_start_min": _num(0, 600), "output_dir": _dir, "hashtags": _tags,
-            "credit": lambda v: bool(v), "smart_cut": lambda v: _choice(v, ("auto", True, False)),
+            "lead": _num(0, 60, int), "skip_start_min": _num(0, 600), "output_dir": _dir, "hashtags": _tags,
+            "credit": lambda v: bool(v),
             "layout": lambda v: _choice(v, ("blur", "face")), "split": _num(0.25, 0.75), "keep_source_days": _num(0, 365, int),
             "stall_min": _num(0, 240, int), "power": lambda v: _choice(v, ("eco", "normal"))}
 

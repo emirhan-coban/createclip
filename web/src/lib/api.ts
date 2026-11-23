@@ -9,7 +9,7 @@ export type Job = {
 export type Source = { id: number; url: string; name: string; added: number; backfill: number };
 export type Config = { engine: string; clips_per_video: number; min_len: number; max_len: number; lead: number;
   skip_start_min: number; output_dir: string; hashtags: string[]; credit: boolean;
-  smart_cut: "auto" | boolean; layout: "blur" | "face"; split: number; keep_source_days: number; stall_min: number; power: "eco" | "normal" };
+  layout: "blur" | "face"; split: number; keep_source_days: number; stall_min: number; power: "eco" | "normal" };
 export type State = { now: number; jobs: Job[]; clips: Clip[]; sources: Source[]; output: string; config: Config };
 
 export async function api<T = unknown>(path: string, body?: unknown): Promise<T> {

@@ -3,8 +3,6 @@ description with a credit line (timestamped link back to the original) plus the 
 import re
 from urllib.parse import urlencode
 
-from . import speech
-
 
 def _timestamp_link(url: str, start: float) -> str:
     t = int(start)
@@ -19,15 +17,11 @@ def clean_title(title: str, limit: int = 90) -> str:
     return (t[:limit].rsplit(" ", 1)[0] if len(t) > limit else t) or "Yayından en iyi an"
 
 
-def make(video_title: str, channel: str, url: str, start: float, cfg: dict, words: list[dict] | None = None) -> dict:
-    """`words`: what is said inside the clip (Whisper words). With speech, the title is a sentence from it and the
-    most repeated meaningful words become hashtags; otherwise the source video's title is used."""
-    title = (speech.title(words) if words else None) or clean_title(video_title)
+def make(video_title: str, channel: str, url: str, start: float, cfg: dict) -> dict:
+    title = clean_title(video_title)
     tags = [h if h.startswith("#") else "#" + h for h in cfg.get("hashtags", [])]
     if channel:
         tags.append("#" + re.sub(r"\W+", "", channel))
-    if words:
-        tags += ["#" + k for k in speech.keywords(words)]
     lines = []
     if cfg.get("credit", True):
         lines += [f"Kaynak yayın: {channel or 'yayıncı'} ({_timestamp_link(url, start)})", ""]

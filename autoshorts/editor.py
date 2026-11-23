@@ -11,7 +11,7 @@ import tempfile
 from array import array
 from pathlib import Path
 
-from . import config, download, export, faces, power, render, speech, store, texts, transcribe
+from . import config, download, export, faces, power, render, store, texts
 from .proc import Cancelled, log, run, run_ok
 
 OW, OH = 1080, 1920
@@ -322,16 +322,6 @@ def _archive(old: Path):
         f = old.with_suffix(ext)
         if f.exists():
             shutil.move(str(f), str(dest / f.name))
-
-
-def transcribe_source(con, cfg: dict, clip_id: int, progress=lambda f, t="": None) -> list[dict]:
-    """Speech-to-text for the whole source file (word times in source seconds), for sentence-aware cuts and titles."""
-    clip = store.get_clip(con, clip_id)
-    src = source_path(clip)
-    if not src:
-        raise RuntimeError("Kaynak görüntü yok; önce indirilmeli.")
-    progress(0.1, "Konuşma çözülüyor (genellikle yarım dakika)")
-    return speech.clean_words(transcribe.transcribe_words(src, cfg.get("language", "tr")))
 
 
 def source_info(clip: dict) -> dict | None:

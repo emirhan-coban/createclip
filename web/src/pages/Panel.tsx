@@ -207,15 +207,6 @@ function Settings({ s, refresh }: { s: State; refresh: () => void }) {
           </select>
           <span className="mt-1 block text-xs text-mute">Tasarruf modunda aynı iş yaklaşık aynı sürede biter (boş bilgisayarda), ama diğer uygulamalara öncelik verir ve çok daha az işlemci kullanır. Mac dışında donanım kodlayıcı yoksa x264 kullanılır.</span>
         </label>
-        <label className="block sm:col-span-2">
-          <span className="text-sm text-ink-2">Konuşmaya göre kesim</span>
-          <select value={String(f.smart_cut)} onChange={(e) => set("smart_cut", e.target.value === "auto" ? "auto" : e.target.value === "true")} className={`${field} mt-1`}>
-            <option value="auto">Otomatik (Whisper modeli indirilmişse)</option>
-            <option value="true">Açık</option>
-            <option value="false">Kapalı (yalnızca zirve anına göre)</option>
-          </select>
-          <span className="mt-1 block text-xs text-mute">Klibin cümle ortasında başlayıp bitmesini önler; başlık ve etiketleri konuşmadan çıkarır. Klip başına yarım dakika kadar ekler.</span>
-        </label>
         {num("keep_source_days", "Kaynak görüntü kaç gün saklansın", "Düzenlenmiş klipler hariç; 0 = silme")}
         {num("stall_min", "Kaç dk ilerleme yoksa iş durdurulsun", "0 = hiç durdurma")}
         <label className="block">

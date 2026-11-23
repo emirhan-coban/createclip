@@ -2,7 +2,7 @@
 import re
 import sqlite3
 
-from . import config, download, editor, export, faces, finder, meta, render, speech, store, transcribe
+from . import config, download, editor, export, faces, finder, meta, render, store
 from .proc import Cancelled, log
 
 PAD = 6.0      # fallback for `source_pad`: extra footage around a cut, so the exact trim never runs off the file
@@ -117,15 +117,8 @@ def process_video(con, cfg: dict, url: str, n: int | None = None, at: list[str] 
         raise
 
 
-def _smart(cfg: dict) -> bool:
-    v = cfg.get("smart_cut", "auto")
-    if v == "auto":
-        return transcribe.available() and transcribe.cached()
-    return bool(v) and transcribe.available()
-
-
 def make_clip(con, cfg: dict, video: download.Video, clip_id: int, m: finder.Moment, progress=_noop):
-    """Download the range, (optionally) listen to it to snap the cut to sentences, render it vertical and save it with
+    """Download the range, render it vertical and save it with
     title/description to the output folder."""
     base = config.data_dir() / "clips"
     raw = base / "source" / f"{clip_id}.mp4"                 # kept: the editor cuts from it
@@ -137,24 +130,6 @@ def make_clip(con, cfg: dict, video: download.Video, clip_id: int, m: finder.Mom
     store.set_source(con, clip_id, str(raw), start, end)
     info = editor.source_info(store.get_clip(con, clip_id))   # also shifts the file's timestamps to start at 0
     cs, ce = m.start, m.end
-    words = []
-    if _smart(cfg):
-        progress(0.3, "konuşma dinleniyor, kesim cümleye oturtuluyor")
-        try:
-            words = editor.transcribe_source(con, cfg, clip_id)
-        except Cancelled:
-            raise
-        except Exception as e:  # noqa: BLE001 - speech is a bonus: the clip is still made from the peak
-            log.warning("clip %s: speech analysis skipped: %s", clip_id, e)
-            words = []
-    if words and m.engine != "manual":            # times typed by the user stay exactly as typed
-        a, b = speech.snap(words, cs - start, ce - start, min_len=cfg["min_len"], max_len=cfg["max_len"])
-        cs, ce = start + max(0.0, a), start + min(info["duration"], b)
-        if (cs, ce) != (m.start, m.end):
-            try:
-                store.update_clip(con, clip_id, start=round(cs, 2), end=round(ce, 2))
-            except sqlite3.IntegrityError:               # another clip already starts there: keep the original cut
-                cs, ce = m.start, m.end
     project = None
     if cfg.get("layout") == "face" and faces.available():
         progress(0.45, "kamera aranıyor")
@@ -177,8 +152,7 @@ def make_clip(con, cfg: dict, video: download.Video, clip_id: int, m: finder.Mom
         render.vertical(raw, cs - start, ce - cs, out)
     progress(0.95, "kaydediliyor")
     render.thumbnail(out, base / f"{clip_id}.jpg")
-    spoken = [w for w in words if w["end"] > cs - start and w["start"] < ce - start]
-    meta_info = meta.make(video.title, video.channel, video.url, cs, cfg, spoken)
+    meta_info = meta.make(video.title, video.channel, video.url, cs, cfg)
     saved = export.save(cfg, clip_id, video.channel, cs, out, base / f"{clip_id}.jpg", meta_info["title"], meta_info["description"])
     store.update_clip(con, clip_id, file=str(saved), title=meta_info["title"], description=meta_info["description"],
                       tags=meta_info["tags"], status="done", error=None)

@@ -13,7 +13,6 @@ dependencies = ["fastapi", "uvicorn"]     # the local web app; the machine also 
 dev = ["pytest", "httpx", "pillow"]
 faces = ["opencv-python-headless"]   # find the streamer's camera for the face-on-top layout
 editor = ["pillow"]          # text layers in the clip editor
-speech = ["mlx-whisper"]     # sentence-aware cuts and speech titles: Whisper on Apple Silicon
 clipsai = ["clipsai"]      # transcript-based finder (also needs whisperx; Python <= 3.12 recommended)
 
 [project.scripts]

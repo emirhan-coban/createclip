@@ -72,14 +72,11 @@ def main(argv=None) -> int:
         print(f"çıktı klasörü: {config.root() / cfg['output_dir']}")
         # optional parts: not errors, but say what is missing and how to get it
         import importlib.util
-        from . import transcribe
         from . import faces
         dist = config.ui_dist()                                               # not imported from api: FastAPI is optional
         opt = [("web arayüzü (FastAPI)", importlib.util.find_spec("fastapi") is not None and importlib.util.find_spec("uvicorn") is not None, "pip install -e '.'"),
                ("arayüz derlemesi", (dist / "index.html").exists(), "cd web && npm install && npm run build"),
                ("metin katmanı: Pillow", importlib.util.find_spec("PIL") is not None, "pip install -e '.[editor]'"),
-               ("konuşmaya göre kesim: mlx-whisper", transcribe.available(), "pip install -e '.[speech]'"),
-               ("konuşmaya göre kesim: Whisper modeli", transcribe.cached(), "ilk kullanımda ~3 GB iner"),
                ("kamera yüzü bulma: OpenCV", faces.available(), "pip install -e '.[faces]'"),
                ("ClipsAI motoru (deneysel)", importlib.util.find_spec("clipsai") is not None, "isteğe bağlı: pip install -e '.[clipsai]'")]
         for name, ok, fix in opt:

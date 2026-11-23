@@ -142,16 +142,6 @@ def find_peaks(msgs, duration, **kw):
     return peaks_from_scores(bin_scores(msgs, duration), duration, **kw)
 
 
-def top_words(msgs, k=20):
-    """Frequent non-emote words in chat (biases the speech model's vocabulary)."""
-    c = Counter()
-    for m in msgs:
-        txt = EMOTE_RE.sub(" ", m["c"])
-        for w in re.findall(r"[A-Za-zÇĞİÖŞÜçğıöşü]{4,}", txt):
-            c[w.replace("İ", "i").replace("I", "ı").lower()] += 1   # Turkish-aware lowercase
-    return [w for w, _ in c.most_common(k)]
-
-
 # ---------------------------------------------------------------- smart (sparse) chat
 WIN = 5  # seconds covered by one chat request
 

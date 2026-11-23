@@ -13,7 +13,6 @@ from autoshorts.sources import peaks
 @pytest.fixture
 def env(tmp_path):
     config.configure(tmp_path)
-    (tmp_path / "autoshorts.json").write_text('{"smart_cut": false}')          # no Whisper in the default tests
     con = store.connect()
     yield tmp_path, con
     con.close()
@@ -635,29 +634,7 @@ def test_job_terminal_marks_failure_and_cancel(api, monkeypatch):
     assert logs[-1] == ("err", "✗ hata: bir şey patladı")
 
 
-# ---------------------------------------------------------------- speech-aware cuts, titles, face layout
-WORDS = [{"word": w, "start": 100 + i * 0.4, "end": 100 + i * 0.4 + 0.3} for i, w in enumerate(
-    "Bu oyunu ilk kez oynuyorum. Rakip bana saldırdı ve ben hemen kaçtım! Sonra herkes bağırmaya başladı, inanılmaz bir an. "
-    "Şimdi devam edelim mi?".split())]
-
-
-def test_speech_snap_title_and_keywords():
-    from autoshorts import speech
-    sent = speech.sentences(WORDS)
-    assert len(sent) == 4 and sent[0]["text"].endswith("oynuyorum.")
-    # a cut that starts mid-sentence is moved to the sentence start, one that ends mid-sentence to the sentence end
-    a, b = speech.snap(WORDS, WORDS[2]["start"], WORDS[12]["end"], min_len=3, max_len=60)
-    assert abs(a - (sent[0]["start"] - 0.15)) < 0.01 and abs(b - (sent[1]["end"] + 0.3)) < 0.01
-    # nothing said near the edges: unchanged
-    assert speech.snap([], 10, 40, min_len=5, max_len=60) == (10, 40)
-    assert speech.density(WORDS, 100, 110) > 1.5
-    t = speech.title(WORDS)
-    assert t and t[0].isupper() and len(t) <= 71
-    assert speech.keywords([{"word": w, "start": 0, "end": 1} for w in "oyun oyun oyun kaçtım kaçtım ve bu".split()]) == ["oyun", "kaçtım"]
-    m = meta.make("Uzun yayın başlığı", "kanal", "https://kick.com/a/videos/x", 100, {"hashtags": ["#shorts"], "credit": True}, WORDS)
-    assert m["title"] == t and "#shorts" in m["description"]
-
-
+# ---------------------------------------------------------------- face layout
 def test_dedupe_uses_the_original_start(env):
     _, con = env
     cid = store.add_clip(con, "https://kick.com/a/videos/x", 100, 150, 3.0, "chat")
@@ -688,11 +665,11 @@ def test_face_pick_and_cell():
     assert 1.0 < cell["zoom"] <= 8 and abs(cell["cx"] - 0.85) < 0.01
 
 
-def test_make_clip_snaps_cut_and_uses_face_layout(env, monkeypatch):
+def test_make_clip_uses_face_layout(env, monkeypatch):
     import subprocess
     from autoshorts import editor, faces, finder
     tmp_path, con = env
-    config.save({"smart_cut": True, "layout": "face", "split": 0.4, "min_len": 3, "max_len": 60, "source_pad": 10})
+    config.save({"layout": "face", "split": 0.4, "min_len": 3, "max_len": 60, "source_pad": 10})
 
     def fake_fetch(url, s, e, out, h):
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -700,30 +677,20 @@ def test_make_clip_snaps_cut_and_uses_face_layout(env, monkeypatch):
                         "sine=frequency=440:sample_rate=48000", "-t", "30", "-pix_fmt", "yuv420p", "-c:v", "libx264", "-c:a", "aac", "-shortest", str(out)], check=True)
         return out
     monkeypatch.setattr(download, "fetch_range", fake_fetch)
-    words = [{"word": w, "start": 100 + i * 0.4, "end": 100 + i * 0.4 + 0.3} for i, w in enumerate(WORDS_TEXT.split())]
-    # source starts at stream second 90: words must sit inside the 30 s file, so shift them
-    words = [{**w, "start": w["start"] - 90 + 6, "end": w["end"] - 90 + 6} for w in words]
-    monkeypatch.setattr(pipeline.transcribe, "available", lambda: True)
-    monkeypatch.setattr(editor.transcribe, "transcribe_words", lambda src, lang="tr": words)
     monkeypatch.setattr(faces, "available", lambda: True)
     monkeypatch.setattr(faces, "detect", lambda src, dur: {"cx": 0.85, "cy": 0.8, "w": 0.1, "h": 0.16, "seen": 1.0})
     video = download.Video("https://kick.com/a/videos/x", "Big stream", 3600.0, "kick", "a")
     store.upsert_video(con, video.url, title=video.title)
-    m = finder.Moment(103.0, 118.0, 4.2, "chat")                    # starts mid-sentence
+    m = finder.Moment(103.0, 118.0, 4.2, "chat")
     cid = store.add_clip(con, video.url, m.start, m.end, m.score, m.engine)
     saved = pipeline.make_clip(con, config.load(), video, cid, m)
     c = store.get_clip(con, cid)
     assert c["status"] == "done" and saved.exists()
-    assert c["start"] != 103.0 and c["key_start"] == 103.0                                # snapped, dedupe key kept
-    assert c["title"] and c["title"][0].isupper() and "Big stream" not in c["title"]
+    assert (c["start"], c["end"]) == (103.0, 118.0) and c["title"] == "Big stream"
     proj = store.get_project(con, cid)
     assert proj["layout"]["mode"] == "stack" and proj["layout"]["split"] == 0.4 and proj["layout"]["cells"][0]["zoom"] > 1
     out = json.loads(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=width,height", "-of", "json", str(saved)], capture_output=True, text=True).stdout)
     assert (out["streams"][0]["width"], out["streams"][0]["height"]) == (1080, 1920)
-
-
-WORDS_TEXT = ("Bu oyunu ilk kez oynuyorum. Rakip bana saldırdı ve ben hemen kaçtım! Sonra herkes bağırmaya başladı, inanılmaz bir an. "
-              "Şimdi devam edelim mi? Evet devam ediyoruz çünkü daha bitmedi.")
 
 
 def test_watchdog_stops_a_stalled_job(env, monkeypatch):
@@ -790,12 +757,9 @@ def test_peaks_are_spread_out():
     assert 0 < len(out) <= 6 and all(sum(1 for q in out if a <= q.time < a + 600) <= 3 for a in range(0, 7200, 30))
 
 
-def test_manual_cut_is_not_snapped(env, monkeypatch):
+def test_manual_cut_stays_as_typed(env, monkeypatch):
     from autoshorts import finder
-    config.save({"smart_cut": True, "min_len": 3, "max_len": 60})
-    monkeypatch.setattr(pipeline.transcribe, "available", lambda: True)
-    words = [{"word": "Merhaba.", "start": 1.0, "end": 1.5}, {"word": "Bugün", "start": 2.0, "end": 2.3}, {"word": "güzel.", "start": 2.4, "end": 2.9}]
-    monkeypatch.setattr(pipeline.editor, "transcribe_source", lambda con, cfg, cid, progress=None: words)
+    config.save({"min_len": 3, "max_len": 60})
     monkeypatch.setattr(download, "fetch_range", lambda url, s, e, out, h: (out.parent.mkdir(parents=True, exist_ok=True), out.write_bytes(b"r"), out)[-1])
     monkeypatch.setattr(pipeline.editor, "source_info", lambda c: {"width": 640, "height": 360, "duration": 60.0, "audio": True, "start_time": 0.0})
     monkeypatch.setattr(pipeline.render, "vertical", lambda raw, off, ln, out: out.write_bytes(b"v") or out)
@@ -868,18 +832,7 @@ def test_children_run_at_lower_priority():
         proc.set_nice(0)
 
 
-def test_blur_graph_is_small_and_whisper_runs_in_a_child(monkeypatch, tmp_path):
-    from autoshorts import render, transcribe
+def test_blur_graph_is_small():
+    from autoshorts import render
     g = render.graph()
     assert "scale=135:240" in g and "boxblur=6:3" in g and g.endswith("[v]")          # blur at 1/8 size
-    monkeypatch.setattr(transcribe, "available", lambda: True)
-    seen = {}
-
-    def fake_run(cmd, what, timeout=None, on_line=None):
-        import subprocess
-        seen["cmd"] = cmd
-        Path(cmd[-1]).write_text('[{"word": "selam", "start": 0.1, "end": 0.4}]')
-        return subprocess.CompletedProcess(cmd, 0, "", "")
-    monkeypatch.setattr(transcribe, "run", fake_run)
-    words = transcribe.transcribe_words(tmp_path / "a.mp4", "tr")
-    assert words[0]["word"] == "selam" and seen["cmd"][1:3] == ["-m", "autoshorts.transcribe"]
