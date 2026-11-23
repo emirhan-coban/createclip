@@ -1,0 +1,88 @@
+@import "tailwindcss";
+@import "@fontsource-variable/inter";
+
+/* Kliparya design tokens. Light is the home theme; dark follows the system. One accent (lime) carries the
+   whole interface: it is only ever used for the thing you are meant to act on or look at. */
+:root {
+  --paper: #fafaf8;
+  --paper-2: #f2f2ee;
+  --raised: #ffffff;
+  --ink: #151613;
+  --ink-2: #4a4c45;
+  --mute: #8a8d84;
+  --line: #e5e5df;
+  --lime: #bff453;
+  --lime-ink: #151613;
+  --lime-soft: #e9fbbf;
+  --danger: #c2362b;
+  --shadow: 0 1px 2px rgb(21 22 19 / 0.05), 0 12px 32px -12px rgb(21 22 19 / 0.14);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #0f100e;
+    --paper-2: #171815;
+    --raised: #1c1d19;
+    --ink: #f2f3ee;
+    --ink-2: #b9bbb2;
+    --mute: #7c7f76;
+    --line: #2a2b26;
+    --lime-soft: #2a3512;
+    --danger: #ff7b72;
+    --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 16px 40px -16px rgb(0 0 0 / 0.6);
+    color-scheme: dark;
+  }
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-paper-2: var(--paper-2);
+  --color-raised: var(--raised);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-mute: var(--mute);
+  --color-line: var(--line);
+  --color-lime: var(--lime);
+  --color-lime-ink: var(--lime-ink);
+  --color-lime-soft: var(--lime-soft);
+  --color-danger: var(--danger);
+  --font-sans: "Inter Variable", -apple-system, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif;
+  --shadow-lift: var(--shadow);
+}
+
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-feature-settings: "cv11", "ss03";
+  letter-spacing: -0.011em;
+  -webkit-font-smoothing: antialiased;
+}
+::selection { background: var(--lime); color: var(--lime-ink); }
+.tnum { font-variant-numeric: tabular-nums; }
+
+/* Display type: large, tight, no decoration; the size does the talking. */
+.display {
+  font-weight: 640;
+  letter-spacing: -0.045em;
+  line-height: 0.98;
+  font-size: clamp(2.6rem, 7.4vw, 6.2rem);
+}
+.title { font-weight: 620; letter-spacing: -0.03em; line-height: 1.05; }
+
+@layer base {
+  :focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; border-radius: 10px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
+/* Caption fonts: the same files the exporter draws with (variable weights for Montserrat and Gabarito). */
+@font-face { font-family: "KMontserrat"; src: url("/fonts/Montserrat.ttf"); font-weight: 100 900; font-display: block; }
+@font-face { font-family: "KGabarito"; src: url("/fonts/Gabarito.ttf"); font-weight: 100 900; font-display: block; }
+@font-face { font-family: "KPoppins"; src: url("/fonts/Poppins-Bold.ttf"); font-weight: 700; font-display: block; }
+
+@keyframes slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(300%); } }

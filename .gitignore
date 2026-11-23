@@ -1,8 +1,12 @@
 .venv/
+data/
 output/
+ready/
 __pycache__/
 *.egg-info/
 .pytest_cache/
 .DS_Store
+autoshorts.json
 settings.json
-ready/
+web/node_modules/
+web/dist/

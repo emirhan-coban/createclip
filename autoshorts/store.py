@@ -1,0 +1,143 @@
+"""SQLite state: sources being watched, videos seen and clips. One file: data/autoshorts.db.
+
+Clip life cycle:  new -> done (rendered and saved to the output folder), or failed."""
+import json
+import sqlite3
+import time
+from pathlib import Path
+
+from . import config
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS sources (id INTEGER PRIMARY KEY, url TEXT UNIQUE, name TEXT, added REAL, backfill INTEGER);
+CREATE TABLE IF NOT EXISTS videos (url TEXT PRIMARY KEY, source_id INTEGER, title TEXT, duration REAL,
+  status TEXT, error TEXT, added REAL);
+CREATE TABLE IF NOT EXISTS edits (clip_id INTEGER PRIMARY KEY, project TEXT, updated REAL);
+CREATE TABLE IF NOT EXISTS jobs (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT, url TEXT, status TEXT, error TEXT,
+  started REAL, run_started REAL, ended REAL);
+CREATE TABLE IF NOT EXISTS clips (id INTEGER PRIMARY KEY, video_url TEXT, start REAL, end REAL, score REAL,
+  engine TEXT, file TEXT, title TEXT, description TEXT, tags TEXT, status TEXT, error TEXT, created REAL,
+  UNIQUE(video_url, start));
+"""
+
+
+def connect(db: Path | None = None) -> sqlite3.Connection:
+    db = db or (config.data_dir() / "autoshorts.db")
+    con = sqlite3.connect(db, timeout=30)
+    con.row_factory = sqlite3.Row
+    con.executescript(SCHEMA)
+    have = {r[1] for r in con.execute("PRAGMA table_info(clips)")}
+    for col, typ in (("src_file", "TEXT"), ("src_start", "REAL"), ("src_end", "REAL")):      # editor source footage
+        if col not in have:
+            con.execute(f"ALTER TABLE clips ADD COLUMN {col} {typ}")
+    con.commit()
+    return con
+
+
+def rows(con, sql: str, *a) -> list[dict]:
+    return [dict(r) for r in con.execute(sql, a).fetchall()]
+
+
+# ---- sources / videos
+def add_source(con, url: str, name: str = "", backfill: int = 3) -> bool:
+    cur = con.execute("INSERT OR IGNORE INTO sources(url, name, added, backfill) VALUES (?,?,?,?)",
+                      (url, name, time.time(), backfill))
+    con.commit()
+    return cur.rowcount == 1
+
+
+def remove_source(con, url: str):
+    con.execute("DELETE FROM sources WHERE url=?", (url,))
+    con.commit()
+
+
+def sources(con) -> list[dict]:
+    return rows(con, "SELECT * FROM sources ORDER BY id")
+
+
+def known_video(con, url: str) -> bool:
+    return con.execute("SELECT 1 FROM videos WHERE url=?", (url,)).fetchone() is not None
+
+
+def upsert_video(con, url: str, **f):
+    if not known_video(con, url):
+        con.execute("INSERT INTO videos(url, status, added) VALUES (?,?,?)", (url, f.pop("status", "pending"), time.time()))
+    for k, v in f.items():
+        con.execute(f"UPDATE videos SET {k}=? WHERE url=?", (v, url))
+    con.commit()
+
+
+def pending_videos(con) -> list[dict]:
+    return rows(con, "SELECT * FROM videos WHERE status='pending' ORDER BY added")
+
+
+# ---- clips
+def add_clip(con, video_url: str, start: float, end: float, score: float, engine: str) -> int | None:
+    cur = con.execute("INSERT OR IGNORE INTO clips(video_url, start, end, score, engine, status, created) "
+                      "VALUES (?,?,?,?,?,'new',?)", (video_url, round(start, 2), round(end, 2), score, engine, time.time()))
+    con.commit()
+    return cur.lastrowid if cur.rowcount else None
+
+
+def find_clip(con, video_url: str, start: float) -> dict | None:
+    r = rows(con, "SELECT * FROM clips WHERE video_url=? AND start=?", video_url, round(start, 2))
+    return r[0] if r else None
+
+
+def update_clip(con, clip_id: int, **f):
+    if "tags" in f and not isinstance(f["tags"], str):
+        f["tags"] = json.dumps(f["tags"], ensure_ascii=False)
+    for k, v in f.items():
+        con.execute(f"UPDATE clips SET {k}=? WHERE id=?", (v, clip_id))
+    con.commit()
+
+
+def clips(con, status: str | None = None) -> list[dict]:
+    q = "SELECT c.*, v.title AS video_title FROM clips c LEFT JOIN videos v ON v.url=c.video_url"
+    if status:
+        return rows(con, q + " WHERE c.status=? ORDER BY c.score DESC", status)
+    return rows(con, q + " ORDER BY c.id")
+
+
+def get_clip(con, clip_id: int) -> dict | None:
+    r = rows(con, "SELECT c.*, v.title AS video_title FROM clips c LEFT JOIN videos v ON v.url=c.video_url "
+                  "WHERE c.id=?", clip_id)
+    return r[0] if r else None
+
+
+# ---- job history (the live job objects are in memory; this keeps the list across restarts)
+def add_job(con, kind: str, url: str | None, started: float) -> int:
+    cur = con.execute("INSERT INTO jobs(kind, url, status, started) VALUES (?,?,'queued',?)", (kind, url, started))
+    con.commit()
+    return cur.lastrowid
+
+
+def update_job(con, job_id: int, **f):
+    for k, v in f.items():
+        con.execute(f"UPDATE jobs SET {k}=? WHERE id=?", (v, job_id))
+    con.commit()
+
+
+def recent_jobs(con, limit: int = 20) -> list[dict]:
+    return rows(con, "SELECT * FROM jobs ORDER BY id DESC LIMIT ?", limit)
+
+
+# ---- editor: source footage and the saved edit project of a clip
+def set_source(con, clip_id: int, file: str | None, start: float | None, end: float | None):
+    update_clip(con, clip_id, src_file=file, src_start=start, src_end=end)
+
+
+def get_project(con, clip_id: int) -> dict | None:
+    r = rows(con, "SELECT project FROM edits WHERE clip_id=?", clip_id)
+    return json.loads(r[0]["project"]) if r else None
+
+
+def delete_project(con, clip_id: int):
+    con.execute("DELETE FROM edits WHERE clip_id=?", (clip_id,))
+    con.commit()
+
+
+def save_project(con, clip_id: int, project: dict):
+    con.execute("INSERT OR REPLACE INTO edits(clip_id, project, updated) VALUES (?,?,?)",
+                (clip_id, json.dumps(project, ensure_ascii=False), time.time()))
+    con.commit()
