@@ -344,7 +344,7 @@ def test_layout_geometry_matches_between_modes():
     assert round(h2) == 540 and round(w2) == round(w / 2)
     g = editor.build_graph({"layout": {"mode": "stack", "cells": [{"cx": .5, "cy": .5, "zoom": 1}, {"cx": .85, "cy": .8, "zoom": 3}]}}, 1920, 1080)
     assert "vstack" in g and g.count("crop=") == 2 and "scale=1080:960" in g
-    assert "boxblur" in editor.build_graph({"layout": {"mode": "blur", "cells": []}}, 1920, 1080)
+    assert "pad=1080:1920" in editor.build_graph({"layout": {"mode": "blur", "cells": []}}, 1920, 1080)
 
 
 def test_clean_project_clamps_and_rejects():
@@ -832,7 +832,7 @@ def test_children_run_at_lower_priority():
         proc.set_nice(0)
 
 
-def test_blur_graph_is_small():
+def test_blur_graph_is_black_bars():
     from autoshorts import render
     g = render.graph()
-    assert "scale=135:240" in g and "boxblur=6:3" in g and g.endswith("[v]")          # blur at 1/8 size
+    assert "boxblur" not in g and "pad=1080:1920" in g and g.endswith("black[v]")

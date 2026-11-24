@@ -1,4 +1,4 @@
-"""Stage 3: raw footage -> finished vertical clip. Exact trim, 9:16 with a blurred background, 30 fps, one-pass
+"""Stage 3: raw footage -> finished vertical clip. Exact trim, 9:16 on a black background, 30 fps, one-pass
 loudness normalisation (-16 LUFS), faststart. Platforms re-encode anyway, so one good H.264/AAC file is enough."""
 from pathlib import Path
 
@@ -6,13 +6,12 @@ from . import power
 from .proc import run_ok
 
 W, H = 1080, 1920
-# The blurred background is made at 1/8 size and scaled back up: the same look (sigma ~52 px at 1080 wide), 5-6x faster.
-GRAPH = ("[0:v]fps=30,split[a][b];[a]scale={W8}:{H8}:force_original_aspect_ratio=increase,crop={W8}:{H8},boxblur=6:3,"
-         "scale={W}:{H}:flags=bilinear[bg];[b]scale={W}:-2[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2[v]")
+# Black bars above and below: the footage is scaled to the full width and centred on a black 9:16 canvas.
+GRAPH = "[0:v]fps=30,scale={W}:-2,pad={W}:{H}:0:(oh-ih)/2:black[v]"
 
 
 def graph(W: int = W, H: int = H) -> str:
-    return GRAPH.format(W=W, H=H, W8=W // 8, H8=H // 8)
+    return GRAPH.format(W=W, H=H)
 
 
 def vertical(raw: Path, offset: float, length: float, out: Path) -> Path:

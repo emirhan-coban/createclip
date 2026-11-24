@@ -188,7 +188,7 @@ function Settings({ s, refresh }: { s: State; refresh: () => void }) {
         <label className="block">
           <span className="text-sm text-ink-2">Yeni kliplerin yerleşimi</span>
           <select value={f.layout} onChange={(e) => set("layout", e.target.value as Config["layout"])} className={`${field} mt-1`}>
-            <option value="blur">Bulanık arka plan</option>
+            <option value="blur">Siyah arka plan</option>
             <option value="face">Kamera üstte, oyun altta</option>
           </select>
           <span className="mt-1 block text-xs text-mute">Kamera yüzü bulunamazsa bulanık yerleşim kullanılır.</span>

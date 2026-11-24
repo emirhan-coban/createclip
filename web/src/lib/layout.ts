@@ -62,10 +62,8 @@ export function plan(p: Project, W: number, H: number): Layer[] {
       cellLayer("c1", W, H, cells[1], OW, bh, { x: 0, y: th, w: OW, h: bh }, 1, false),
     ];
   }
-  const cover = Math.max(OW / W, OH / H);
   const fgH = (H * OW) / W;
   return [
-    { key: "bg", box: { x: 0, y: 0, w: OW, h: OH }, video: { x: (OW - W * cover) / 2, y: (OH - H * cover) / 2, w: W * cover, h: H * cover }, blur: 36 },
     { key: "fg", box: { x: 0, y: (OH - fgH) / 2, w: OW, h: fgH }, video: { x: 0, y: 0, w: OW, h: fgH }, master: true },
   ];
 }

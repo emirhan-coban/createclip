@@ -290,7 +290,7 @@ function Inspector({ project, edit, hasAudio, clipId, now, selText, onSelText, o
   const { mode, cells } = project.layout;
   const setMode = (m: Mode) => edit((p) => { p.layout.mode = m; return p; });
   const seg = "flex-1 rounded-full px-3 py-2 text-sm transition";
-  const names: Record<Mode, string> = { blur: "Bulanık", crop: "Tek pencere", stack: "İki pencere" };
+  const names: Record<Mode, string> = { blur: "Siyah arka plan", crop: "Tek pencere", stack: "İki pencere" };
   const cellsShown = mode === "crop" ? [0] : mode === "stack" ? [0, 1] : [];
   const label = (i: number) => (mode === "crop" ? "Pencere" : i === 0 ? "Üst pencere" : "Alt pencere");
   const split = project.layout.split ?? 0.5;
@@ -304,7 +304,7 @@ function Inspector({ project, edit, hasAudio, clipId, now, selText, onSelText, o
               className={`${seg} ${mode === m ? "bg-ink font-semibold text-paper" : "text-ink-2 hover:text-ink"}`}>{names[m]}</button>
           ))}
         </div>
-        {mode === "blur" && <p className="mt-3 text-sm text-ink-2">Görüntü ortada, arkası bulanık kopyasıyla dolar.</p>}
+        {mode === "blur" && <p className="mt-3 text-sm text-ink-2">Görüntü ortada, alt ve üstü siyah kalır.</p>}
         {mode === "stack" && (
           <div className="mt-4">
             <p className="text-sm font-medium">Üst / alt oranı</p>
