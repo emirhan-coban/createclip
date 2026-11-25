@@ -72,7 +72,8 @@ def process_video(con, cfg: dict, url: str, n: int | None = None, at: list[str] 
     except download.DownloadError as e:
         store.upsert_video(con, url, status="failed", error=str(e))
         raise
-    store.upsert_video(con, url, title=video.title, duration=video.duration)
+    store.upsert_video(con, url, title=video.title, duration=video.duration,
+                       fp=store.fingerprint(video.platform, video.channel, video.title))
     emit("info", url=url, title=video.title, duration=video.duration, platform=video.platform,
          channel=video.channel, thumbnail=video.thumbnail, live=video.live)
     resume = 0.0 if at else store.resume_point(con, url)
@@ -91,8 +92,18 @@ def process_video(con, cfg: dict, url: str, n: int | None = None, at: list[str] 
                 moments = clamp_live(moments, video.duration)
         else:
             say(f"{video.title[:60]} · {video.duration / 60:.0f} dk · an aranıyor ({engine or cfg['engine']})")
-            moments = finder.find(video, cfg, cache, n, engine,
+            want = n or cfg["clips_per_video"]
+            have = store.count_clips(con, url)
+            # Moments that already became clips must not eat into the requested count: ask the finder for that many extra,
+            # drop the known ones and keep the first `want` new ones (peaks come best-first, so the prefix is stable).
+            moments = finder.find(video, cfg, cache, want + have + (3 if have else 0), engine,
                                   lambda f, t="": progress(find_band[0] + f * (find_band[1] - find_band[0]), t), emit)
+            fresh = [m for m in moments if not (store.find_clip(con, url, m.start) or store.find_near_clip(con, url, m.start))]
+            if have and len(fresh) < len(moments):
+                say(f"{len(moments) - len(fresh)} an daha önce klip olmuştu, atlandı")
+            moments = fresh[:want]
+            if not moments and have:
+                raise finder.FinderError("Bu yayında yeni belirgin an kalmadı (bulunanların hepsi zaten klip).")
         if not moments:
             raise finder.FinderError("Belirgin bir an bulunamadı.")
         emit("moments", moments=[{"rank": r, "start": m.start, "end": m.end, "score": m.score, "engine": m.engine}

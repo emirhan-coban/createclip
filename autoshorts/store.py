@@ -34,6 +34,8 @@ def connect(db: Path | None = None) -> sqlite3.Connection:
     vhave = {r[1] for r in con.execute("PRAGMA table_info(videos)")}
     if "live_until" not in vhave:                         # seconds of the broadcast already available when it was processed live
         con.execute("ALTER TABLE videos ADD COLUMN live_until REAL")
+    if "fp" not in vhave:                                 # platform|channel|title: links with the same value are one broadcast
+        con.execute("ALTER TABLE videos ADD COLUMN fp TEXT")
     con.commit()
     return con
 
@@ -79,6 +81,26 @@ def pending_videos(con) -> list[dict]:
 NEAR = 15.0     # a new candidate this close to an existing clip's start is the same moment (peaks shift as chat data grows)
 
 
+def fingerprint(platform: str, channel: str, title: str) -> str:
+    """Identity of a broadcast across links (a live URL and its finished VOD, a re-link of the same video). Empty = unknown."""
+    if not (platform and channel and title):
+        return ""
+    return f"{platform}|{channel}|{' '.join(title.lower().split())}"
+
+
+def twins(con, video_url: str) -> list[str]:
+    """This URL plus every other URL of the same broadcast (same fingerprint): their clips count as one pool."""
+    r = rows(con, "SELECT fp FROM videos WHERE url=?", video_url)
+    fp = r[0]["fp"] if r else None
+    if not fp:
+        return [video_url]
+    return [video_url] + [x["url"] for x in rows(con, "SELECT url FROM videos WHERE fp=? AND url!=?", fp, video_url)]
+
+
+def _marks(urls: list[str]) -> str:
+    return ",".join("?" * len(urls))
+
+
 def add_clip(con, video_url: str, start: float, end: float, score: float, engine: str) -> int | None:
     if find_clip(con, video_url, start) or find_near_clip(con, video_url, start):
         return None
@@ -88,15 +110,23 @@ def add_clip(con, video_url: str, start: float, end: float, score: float, engine
     return cur.lastrowid if cur.rowcount else None
 
 
+def count_clips(con, video_url: str) -> int:
+    """Clips of this broadcast (any of its links) that exist, failed ones excluded: the moments a new run has to skip."""
+    u = twins(con, video_url)
+    return int(rows(con, f"SELECT COUNT(*) AS c FROM clips WHERE video_url IN ({_marks(u)}) AND status!='failed'", *u)[0]["c"])
+
+
 def find_clip(con, video_url: str, start: float) -> dict | None:
-    r = rows(con, "SELECT * FROM clips WHERE video_url=? AND COALESCE(key_start, start)=?", video_url, round(start, 2))
+    u = twins(con, video_url)
+    r = rows(con, f"SELECT * FROM clips WHERE video_url IN ({_marks(u)}) AND COALESCE(key_start, start)=?", *u, round(start, 2))
     return r[0] if r else None
 
 
 def find_near_clip(con, video_url: str, start: float, tol: float = NEAR) -> dict | None:
-    r = rows(con, "SELECT * FROM clips WHERE video_url=? AND status!='failed' "
+    u = twins(con, video_url)
+    r = rows(con, f"SELECT * FROM clips WHERE video_url IN ({_marks(u)}) AND status!='failed' "
                   "AND ABS(COALESCE(key_start, start)-?)<=? ORDER BY ABS(COALESCE(key_start, start)-?) LIMIT 1",
-             video_url, start, tol, start)
+             *u, start, tol, start)
     return r[0] if r else None
 
 

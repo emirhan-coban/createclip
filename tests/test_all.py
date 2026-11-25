@@ -251,6 +251,48 @@ def test_pipeline_reports_progress_in_order(env, monkeypatch):
     assert "yoğun bölgeler" in texts and "Klip 1/2" in texts and "Klip 2/2" in texts and "indiriliyor" in texts
 
 
+def test_rerun_skips_known_moments_and_still_makes_n_new(env, monkeypatch):
+    tmp_path, con = env
+    from autoshorts import finder
+    video = download.Video("https://kick.com/a/videos/x", "Big", 3600.0, "kick", "a")
+    monkeypatch.setattr(download, "info", lambda url: video)
+    store.upsert_video(con, video.url, title=video.title)
+    for t in (100, 400):                                           # two moments already became clips
+        store.add_clip(con, video.url, t, t + 50, 5.0, "chat")
+    asked = []
+
+    def fake_find(v, cfg, cache, n, engine, progress, emit=None):
+        asked.append(n)
+        return [finder.Moment(t, t + 50, 9.0 - i, "chat") for i, t in enumerate((100, 400, 700, 1000, 1300, 1600))][:n]
+    monkeypatch.setattr(finder, "find", fake_find)
+    monkeypatch.setattr(pipeline, "make_clip", lambda con, cfg, video, cid, m, progress=None: None)
+    ids = pipeline.process_video(con, config.load(), video.url, n=3, say=lambda *_: None)
+    assert asked[0] >= 3 + 2 and len(ids) == 3                      # 3 NEW clips on top of the 2 known ones
+    assert store.count_clips(con, video.url) == 5
+    assert {c["start"] for c in store.clips(con)} == {100, 400, 700, 1000, 1300}
+
+
+def test_other_link_of_same_broadcast_shares_clips(env, monkeypatch):
+    tmp_path, con = env
+    from autoshorts import finder
+    live = download.Video("https://kick.com/a", "Big stream", 3000.0, "kick", "a")
+    vod = download.Video("https://kick.com/a/videos/x", "Big  Stream", 3600.0, "kick", "a")     # same broadcast, other link
+    other = download.Video("https://kick.com/a/videos/y", "Another day", 3600.0, "kick", "a")
+    for v in (live, vod, other):
+        store.upsert_video(con, v.url, title=v.title, fp=store.fingerprint(v.platform, v.channel, v.title))
+    for t in (100, 400):
+        store.add_clip(con, live.url, t, t + 50, 5.0, "chat")
+    assert store.count_clips(con, vod.url) == 2 and store.count_clips(con, other.url) == 0
+    assert store.add_clip(con, vod.url, 405, 455, 4.0, "chat") is None             # near a clip made from the other link
+    assert store.add_clip(con, other.url, 405, 455, 4.0, "chat") is not None       # a different broadcast is independent
+    monkeypatch.setattr(download, "info", lambda url: vod)
+    monkeypatch.setattr(finder, "find", lambda v, cfg, cache, n, engine, progress, emit=None:
+                        [finder.Moment(t, t + 50, 9.0 - i, "chat") for i, t in enumerate((100, 400, 700, 1000, 1300))][:n])
+    monkeypatch.setattr(pipeline, "make_clip", lambda con, cfg, video, cid, m, progress=None: None)
+    ids = pipeline.process_video(con, config.load(), vod.url, n=2, say=lambda *_: None)
+    assert len(ids) == 2 and {c["start"] for c in store.clips(con) if c["video_url"] == vod.url} == {700, 1000}
+
+
 # ---------------------------------------------------------------- FastAPI (React app backend)
 @pytest.fixture
 def api(env):
