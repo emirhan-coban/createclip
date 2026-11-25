@@ -4,6 +4,7 @@ import sqlite3
 
 from . import config, download, editor, export, faces, finder, meta, render, store
 from .proc import Cancelled, log
+from .sources import kick
 
 PAD = 6.0      # fallback for `source_pad`: extra footage around a cut, so the exact trim never runs off the file
 
@@ -26,6 +27,18 @@ def parse_at(spec: str, default_len: float = 45.0) -> tuple[float, float]:
         return _parse_time(a), _parse_time(b)
     s = _parse_time(spec)
     return s, s + default_len
+
+
+def clamp_live(moments: list, available: float, min_len: float = 5.0) -> list:
+    """Manual moments on a running broadcast: cut the end back to what exists; a moment that starts at (or too close
+    to) the live edge cannot be cut yet."""
+    out = []
+    for m in moments:
+        if m.start >= available - min_len:
+            raise finder.FinderError(f"{download.hms(m.start)} henüz yayınlanmadı: canlı yayında en fazla "
+                                     f"{download.hms(available)}'e kadar kesilebilir.")
+        out.append(finder.Moment(m.start, min(m.end, available), m.score, m.engine))
+    return out
 
 
 # ---------------------------------------------------------------- video -> clips
@@ -57,11 +70,15 @@ def process_video(con, cfg: dict, url: str, n: int | None = None, at: list[str] 
         raise
     store.upsert_video(con, url, title=video.title, duration=video.duration)
     emit("info", url=url, title=video.title, duration=video.duration, platform=video.platform,
-         channel=video.channel, thumbnail=video.thumbnail)
+         channel=video.channel, thumbnail=video.thumbnail, live=video.live)
+    if video.live:
+        say(f"Canlı yayın: şu ana kadar {download.hms(video.duration)} kesilebilir (son ~{int(kick.LIVE_MARGIN)} sn hariç)")
     cache = config.data_dir() / "cache" / _slug(url)
     try:
         if at:
             moments = [finder.Moment(*parse_at(a), 0.0, "manual") for a in at]
+            if video.live:
+                moments = clamp_live(moments, video.duration)
         else:
             say(f"{video.title[:60]} · {video.duration / 60:.0f} dk · an aranıyor ({engine or cfg['engine']})")
             moments = finder.find(video, cfg, cache, n, engine,

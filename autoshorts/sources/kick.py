@@ -30,6 +30,13 @@ class Vod:
     channel_id: int
     url: str
     thumbnail: str = ""
+    live: bool = False   # the broadcast is still running: `duration` is how much can be cut so far
+
+
+# A running broadcast has a VOD url too (kick.com/<channel>/videos/<id>, yt-dlp reports it as is_live and no duration).
+# Footage can be cut from it, but the newest HLS segments may be incomplete, so stay this far behind the live edge.
+LIVE_MARGIN = 40.0
+LIVE_MIN = 60.0      # a broadcast younger than this has nothing worth cutting yet
 
 
 def parse_url(url: str):
@@ -54,8 +61,17 @@ def vod_info(url: str) -> Vod:
     d = json.loads(p.stdout)
     if not d.get("timestamp") or not d.get("channel_id"):
         raise KickError("VOD bilgisinde başlangıç zamanı/kanal kimliği yok.")
-    return Vod(vid, slug, d.get("title") or "", float(d["duration"]), int(d["timestamp"]),
-               int(d["channel_id"]), url, d.get("thumbnail") or "")
+    live = bool(d.get("is_live")) or d.get("live_status") == "is_live"
+    if live:
+        duration = time.time() - int(d["timestamp"]) - LIVE_MARGIN
+        if duration < LIVE_MIN:
+            raise KickError("Yayın daha yeni başladı; birkaç dakika sonra tekrar dene.")
+    elif d.get("duration"):
+        duration = float(d["duration"])
+    else:
+        raise KickError("VOD süresi bilinmiyor (yayın bitmemiş olabilir).")
+    return Vod(vid, slug, d.get("title") or "", duration, int(d["timestamp"]),
+               int(d["channel_id"]), url, d.get("thumbnail") or "", live)
 
 
 # Kick's chat endpoint tolerates about 1.5 requests/s sustained (measured over 150 s: 1.2/s and 1.5/s -> no

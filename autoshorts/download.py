@@ -38,6 +38,7 @@ class Video:
     channel: str
     vod: object = None     # kick.Vod / youtube Vod, used by the chat engine
     thumbnail: str = ""
+    live: bool = False     # still broadcasting (Kick): `duration` = footage available so far
 
 
 def hms(sec: float) -> str:
@@ -64,7 +65,7 @@ def info(url: str) -> Video:
     try:
         if pf == "kick":
             v = kick.vod_info(url)
-            return Video(url, v.title, v.duration, pf, v.slug, v, v.thumbnail)
+            return Video(url, v.title, v.duration, pf, v.slug, v, v.thumbnail, v.live)
         if pf == "youtube":
             v = youtube.vod_info(url)
             return Video(url, v.title, v.duration, pf, v.slug, v, v.thumbnail)

@@ -66,6 +66,13 @@ Başlıkları ve açıklamayı yüklemeden önce düzenle; kural tabanlıdır (y
 | `transcript` | **ClipsAI** (videodaki kütüphane), konuşma metninden | Podcast/röportaj için tasarlı, oyun yayınında zayıf; `pip install clipsai whisperx` (torch, Python ≤3.12); **bu repoda denenmedi** |
 | `auto` (varsayılan) | `chat`, olmazsa `audio` | |
 
+## Canlı yayın (Kick)
+Yayın sürerken de klip alınabilir: canlı yayının linki (`kick.com/<kanal>/videos/<id>`, `autoshorts add`/kanal listesinde "canlı" diye geçen) normal bir VOD gibi
+yapıştırılır. Süre, "yayın başlangıcından şimdiye" hesaplanır ve son ~40 sn hariç tutulur (son HLS parçaları eksik olabilir). Elle zamanla (`--at`, Tekli klip)
+şimdiye kadarki herhangi bir an kesilir; henüz olmamış bir an net bir hata verir. Sohbetle an bulma yayının o ana kadarki kısmında çalışır
+(Kick'in ~1,5 istek/sn sınırı geçerli; yayın uzadıkça tekrar çalıştırınca önbellek sayesinde yalnız yeni kısım istenir). Gerçek canlı yayında denendi
+(30 sn'lik kesit → 1080×1920 klip). YouTube canlı yayınları hâlâ yayın bitince işlenir.
+
 ## Geliştirme
 ```bash
 ./.venv/bin/python -m pytest -q
