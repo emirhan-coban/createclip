@@ -31,6 +31,9 @@ def connect(db: Path | None = None) -> sqlite3.Connection:
                      ("key_start", "REAL")):          # the finder's original start: the dedupe key (`start` may be snapped to a sentence)
         if col not in have:
             con.execute(f"ALTER TABLE clips ADD COLUMN {col} {typ}")
+    vhave = {r[1] for r in con.execute("PRAGMA table_info(videos)")}
+    if "live_until" not in vhave:                         # seconds of the broadcast already available when it was processed live
+        con.execute("ALTER TABLE videos ADD COLUMN live_until REAL")
     con.commit()
     return con
 
@@ -73,8 +76,11 @@ def pending_videos(con) -> list[dict]:
 
 
 # ---- clips
+NEAR = 15.0     # a new candidate this close to an existing clip's start is the same moment (peaks shift as chat data grows)
+
+
 def add_clip(con, video_url: str, start: float, end: float, score: float, engine: str) -> int | None:
-    if find_clip(con, video_url, start):
+    if find_clip(con, video_url, start) or find_near_clip(con, video_url, start):
         return None
     cur = con.execute("INSERT OR IGNORE INTO clips(video_url, start, end, score, engine, status, created, key_start) "
                       "VALUES (?,?,?,?,?,'new',?,?)", (video_url, round(start, 2), round(end, 2), score, engine, time.time(), round(start, 2)))
@@ -85,6 +91,22 @@ def add_clip(con, video_url: str, start: float, end: float, score: float, engine
 def find_clip(con, video_url: str, start: float) -> dict | None:
     r = rows(con, "SELECT * FROM clips WHERE video_url=? AND COALESCE(key_start, start)=?", video_url, round(start, 2))
     return r[0] if r else None
+
+
+def find_near_clip(con, video_url: str, start: float, tol: float = NEAR) -> dict | None:
+    r = rows(con, "SELECT * FROM clips WHERE video_url=? AND status!='failed' "
+                  "AND ABS(COALESCE(key_start, start)-?)<=? ORDER BY ABS(COALESCE(key_start, start)-?) LIMIT 1",
+             video_url, start, tol, start)
+    return r[0] if r else None
+
+
+def resume_point(con, video_url: str) -> float:
+    """Where a video processed while it was live left off: the end of its last clip (0 = no such history)."""
+    v = rows(con, "SELECT live_until FROM videos WHERE url=?", video_url)
+    if not v or not v[0]["live_until"]:
+        return 0.0
+    r = rows(con, "SELECT MAX(end) AS e FROM clips WHERE video_url=? AND status!='failed'", video_url)
+    return float(r[0]["e"] or 0.0)
 
 
 def update_clip(con, clip_id: int, **f):

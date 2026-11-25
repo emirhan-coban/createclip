@@ -75,6 +75,12 @@ def process_video(con, cfg: dict, url: str, n: int | None = None, at: list[str] 
     store.upsert_video(con, url, title=video.title, duration=video.duration)
     emit("info", url=url, title=video.title, duration=video.duration, platform=video.platform,
          channel=video.channel, thumbnail=video.thumbnail, live=video.live)
+    resume = 0.0 if at else store.resume_point(con, url)
+    if video.live:
+        store.upsert_video(con, url, live_until=video.duration)
+    if resume:
+        say(f"Bu yayın canlıyken işlenmişti: {download.hms(resume)} sonrası aranıyor")
+        cfg = {**cfg, "skip_start_min": max(float(cfg.get("skip_start_min") or 0), resume / 60)}
     if video.live:
         say(f"Canlı yayın: şu ana kadar {download.hms(video.duration)} kesilebilir (son ~{int(kick.LIVE_MARGIN)} sn hariç)")
     cache = config.data_dir() / "cache" / _slug(url)
@@ -103,7 +109,7 @@ def process_video(con, cfg: dict, url: str, n: int | None = None, at: list[str] 
                 progress(clip_band[0] + (k - 1 + f) / len(moments) * (clip_band[1] - clip_band[0]), f"{label} · {t}")
             if cid is None:
                 say("  zaten var, atlandı")
-                old = store.find_clip(con, url, m.start)
+                old = store.find_clip(con, url, m.start) or store.find_near_clip(con, url, m.start)
                 if old and old["status"] == "done":
                     emit("clip", rank=k, n=len(moments), id=old["id"], stage="daha önce hazırlanmıştı", frac=1.0, done=True,
                          title=old["title"], start=m.start, end=m.end, score=m.score)

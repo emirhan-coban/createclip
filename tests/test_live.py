@@ -79,3 +79,22 @@ def test_channel_not_live_is_a_clear_error(monkeypatch):
     monkeypatch.setattr(download, "run", _flat([{"url": "https://kick.com/kanal/videos/old", "live_status": "was_live"}]))
     with pytest.raises(download.DownloadError, match="canlı yayında değil"):
         download.resolve("https://kick.com/kanal")
+
+
+def test_near_duplicate_moment_is_skipped(tmp_path):
+    from autoshorts import store
+    con = store.connect(tmp_path / "t.db")
+    store.upsert_video(con, URL)
+    assert store.add_clip(con, URL, 1000.0, 1040.0, 5, "chat")
+    assert store.add_clip(con, URL, 1008.0, 1048.0, 5, "chat") is None      # same moment, peak shifted
+    assert store.add_clip(con, URL, 1100.0, 1140.0, 5, "chat")              # different moment
+
+
+def test_resume_point_only_for_videos_processed_live(tmp_path):
+    from autoshorts import store
+    con = store.connect(tmp_path / "t.db")
+    store.upsert_video(con, URL)
+    store.add_clip(con, URL, 1000.0, 1040.0, 5, "chat")
+    assert store.resume_point(con, URL) == 0.0                              # finished VOD: whole video stays eligible
+    store.upsert_video(con, URL, live_until=3000.0)
+    assert store.resume_point(con, URL) == 1040.0

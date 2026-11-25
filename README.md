@@ -73,6 +73,9 @@ yapıştırılır. Süre, "yayın başlangıcından şimdiye" hesaplanır ve son
 (Kick'in ~1,5 istek/sn sınırı geçerli; yayın uzadıkça tekrar çalıştırınca önbellek sayesinde yalnız yeni kısım istenir). Gerçek canlı yayında denendi
 (30 sn'lik kesit → 1080×1920 klip). YouTube canlı yayınları hâlâ yayın bitince işlenir.
 
+**Yayın bitince kalanı al:** aynı video linkini tekrar yapıştır (kanal linkini değil). Yayın canlıyken işlendiyse arama son klibin bitiminden sonrasını kapsar,
+önceki bölüm yeniden puanlanmaz. Ayrıca mevcut bir klibin ±15 sn içindeki adaylar aynı an sayılır ve atlanır.
+
 ## Geliştirme
 ```bash
 ./.venv/bin/python -m pytest -q
