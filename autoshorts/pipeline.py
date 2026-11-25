@@ -58,6 +58,10 @@ def process_video(con, cfg: dict, url: str, n: int | None = None, at: list[str] 
     clips the rest."""
     find_band = (0.03, 0.5) if not at else (0.03, 0.03)
     clip_band = (find_band[1], 1.0)
+    if download.KICK_CHANNEL.match(url.strip()):
+        say(f"Kanal linki: yayında mı bakılıyor ({url})")
+        url = download.resolve(url)                       # kick.com/<channel> -> link of the running broadcast
+        say(f"Canlı yayın bulundu: {url}")
     store.upsert_video(con, url)
     say(f"Video bilgisi alınıyor: {url}")
     progress(0.0, "Video bilgisi alınıyor (YouTube'da ~1 dk sürebilir)")

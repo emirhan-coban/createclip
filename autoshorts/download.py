@@ -156,6 +156,33 @@ def normalize_channel(url: str) -> str:
     return url
 
 
+KICK_CHANNEL = re.compile(r"^(?:https?://)?(?:www\.)?kick\.com/([A-Za-z0-9_.-]+)/?(?:[?#].*)?$")
+KICK_RESERVED = {"video", "videos", "categories", "category", "browse", "following", "dashboard", "search", "clips"}
+
+
+def resolve(url: str) -> str:
+    """A Kick channel link (kick.com/<channel>) is turned into the link of its running broadcast, so the page you are
+    looking at can be pasted as it is. A finished or watchable VOD link is returned unchanged."""
+    m = KICK_CHANNEL.match(url.strip())
+    if not m or m.group(1).lower() in KICK_RESERVED:
+        return url
+    name = m.group(1)
+    p = run(ytdlp.cmd("--flat-playlist", "--playlist-end", "5", "--print", "%(.{url,live_status})j",
+                      f"https://kick.com/{name}/videos"), f"{name} canlı mı", timeout=120)
+    if p.returncode:
+        _check_blocked(p.stderr)
+        raise DownloadError(f"{name} kanalının yayın listesi alınamadı: " + p.stderr.strip()[-200:])
+    for line in p.stdout.splitlines():
+        try:
+            d = json.loads(line)
+        except ValueError:
+            continue
+        if d.get("live_status") == "is_live" and d.get("url"):
+            return d["url"].split("#")[0]
+    raise DownloadError(f"{name} şu an canlı yayında değil. Biten bir yayın için kanalın Videolar sekmesinden "
+                        "yayının linkini (…/videos/…) kopyala.")
+
+
 def list_videos(channel_url: str, limit: int = 10) -> list[dict]:
     """Recent finished streams of a channel, newest first: [{url, title, duration, ts}]. Live/upcoming are dropped."""
     p = run(ytdlp.cmd("--flat-playlist", "--playlist-end", str(limit), "--print",
