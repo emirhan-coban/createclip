@@ -129,12 +129,37 @@ def fetch_chat(vod: Vod, cache_dir: Path, progress=None, mode: str = "smart", wo
                 old.unlink()
         last = [0.0]
 
+        part = cache_dir / (CHAT_FILE + ".part")
+
+        seen = {"off": 0, "count": 0, "pos": 0.0, "tail": b""}
+        MSG, OFFSET = b'"liveChatTextMessageRenderer"', re.compile(rb'"videoOffsetTimeMsec":\s*"(-?\d+)"')
+
+        def replay_state() -> tuple[float, int]:
+            """yt-dlp cannot say how far the replay is (no total), but the growing .part file can: its newest lines hold
+            the video time reached, and every text message in it is counted (only the new bytes are read each time)."""
+            try:
+                with open(part, "rb") as fh:
+                    fh.seek(seen["off"])
+                    chunk = fh.read()
+                seen["off"] += len(chunk)
+            except OSError:
+                return seen["pos"], seen["count"]
+            data = seen["tail"] + chunk
+            seen["count"] += data.count(MSG)
+            seen["tail"] = data[-(len(MSG) - 1):]
+            hits = OFFSET.findall(data)
+            if hits:
+                seen["pos"] = int(hits[-1]) / 1000.0
+            return seen["pos"], seen["count"]
+
         def on_line(line: str):
-            """yt-dlp prints fragment progress while it walks the replay: '[download]  12.3% ... (frag 12/100)'."""
-            m = re.search(r"(\d+(?:\.\d+)?)%", line)
-            if m and progress and time.time() - last[0] > 0.7:
-                last[0] = time.time()
-                progress(min(0.99, float(m.group(1)) / 100), 0, "sohbet tekrarı indiriliyor")
+            """yt-dlp prints '[download]  10.3MiB at 240KiB/s (frag 62)' while it walks the replay."""
+            if not progress or time.time() - last[0] < 1.5:
+                return
+            last[0] = time.time()
+            pos, count = replay_state()
+            frac = min(0.99, pos / vod.duration) if vod.duration else 0.0
+            progress(frac, count, f"sohbet tekrarı indiriliyor (yayının {int(pos // 60)}. dakikasına gelindi)")
         p = run(_cmd("--newline", "--skip-download", "--no-playlist", "--write-subs", "--sub-langs", "live_chat",
                      "-o", str(cache_dir / "chat.%(ext)s"), vod.url), "youtube sohbet tekrarı", timeout=1800, on_line=on_line)
         if not f.exists():

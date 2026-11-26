@@ -631,7 +631,7 @@ def test_youtube_chat_download_streams_progress(env, monkeypatch):
     vod = youtube.Vod("abcdefghijk", "c", "t", 600.0, 0, 0, "https://www.youtube.com/watch?v=abcdefghijk")
     with pytest.raises(youtube.YouTubeError):                    # no replay file was produced: the usual "no chat replay" case
         youtube.fetch_chat(vod, tmp_path / "c", progress=lambda f, n, s="": seen.append((f, s)))
-    assert seen[0] == (0.0, "sohbet tekrarı indiriliyor") and any(abs(f - 0.125) < 1e-9 for f, _ in seen)
+    assert seen[0] == (0.0, "sohbet tekrarı indiriliyor") and any("dakikasına" in t for _, t in seen)
 
 
 def test_job_terminal_log_events(api, monkeypatch):
@@ -878,3 +878,24 @@ def test_blur_graph_is_black_bars():
     from autoshorts import render
     g = render.graph()
     assert "boxblur" not in g and "pad=1080:1920" in g and g.endswith("black[v]")
+
+
+def test_youtube_chat_download_reports_replay_position(tmp_path, monkeypatch):
+    from autoshorts.sources import youtube
+    from autoshorts.sources.kick import Vod
+    part = tmp_path / (youtube.CHAT_FILE + ".part")
+
+    def fake_run(cmd, what, timeout=None, on_line=None):
+        import subprocess
+        part.write_text('{"replayChatItemAction": {"videoOffsetTimeMsec": "600000", "actions": [{"addChatItemAction": {"item": {"liveChatTextMessageRenderer": {}}}}]}}\n' * 3)
+        on_line("[download]   10.30MiB at  240.14KiB/s (00:00:38) (frag 62)")
+        (tmp_path / youtube.CHAT_FILE).write_text(
+            '{"replayChatItemAction": {"videoOffsetTimeMsec": "5000", "actions": [{"addChatItemAction": {"item": {"liveChatTextMessageRenderer": '
+            '{"id": "a", "message": {"runs": [{"text": "selam"}]}}}}}]}}\n')
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+    monkeypatch.setattr(youtube, "run", fake_run)
+    monkeypatch.setattr(youtube, "_cmd", lambda *a: ["yt-dlp", *a])
+    seen = []
+    vod = Vod("x" * 11, "k", "t", 6000.0, 0, 0, "https://youtu.be/xxxxxxxxxxx")
+    youtube.fetch_chat(vod, tmp_path, progress=lambda f, n, t="": seen.append((f, n, t)))
+    assert any(abs(f - 0.1) < 0.01 and n == 3 and "10. dakika" in t for f, n, t in seen)
