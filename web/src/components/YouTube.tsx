@@ -88,6 +88,7 @@ export function YouTubeSettings() {
           {yt.connected
             ? <button type="button" onClick={disconnect} className={btn}>Bağlantıyı kes</button>
             : <button type="button" onClick={connect} className={btn}>YouTube'a bağlan</button>}
+          {yt.connected && !yt.analytics && <span className="basis-full text-sm text-ink-2">Analiz sayfası için ek izin gerekiyor: bağlantıyı kesip yeniden bağlan.</span>}
         </div>
       )}
       {err && <p role="alert" className="mt-2 text-sm text-danger">{err}</p>}

@@ -6,10 +6,14 @@ import { useAppState } from "../lib/useAppState";
 import { Poster } from "../components/Poster";
 import { ClipDialog } from "../components/ClipDialog";
 import { YouTubeSettings } from "../components/YouTube";
+import { Top5 } from "../components/Top5";
+import { Analytics } from "../components/Analytics";
 
 const NAV = [
   { to: "/panel", label: "Genel bakış", end: true },
   { to: "/panel/klipler", label: "Klipler" },
+  { to: "/panel/top5", label: "Top 5" },
+  { to: "/panel/analiz", label: "Analiz" },
   { to: "/panel/kanallar", label: "Kanallar" },
   { to: "/panel/ayarlar", label: "Ayarlar" },
 ];
@@ -32,6 +36,8 @@ export default function Panel() {
           <Routes>
             <Route index element={<Overview s={state} />} />
             <Route path="klipler" element={<Clips s={state} refresh={refresh} />} />
+            <Route path="top5" element={<Top5 s={state} refresh={refresh} />} />
+            <Route path="analiz" element={<Analytics />} />
             <Route path="kanallar" element={<Channels s={state} refresh={refresh} />} />
             <Route path="ayarlar" element={<Settings s={state} refresh={refresh} />} />
             <Route path="*" element={<Navigate to="/panel" replace />} />
@@ -77,7 +83,7 @@ function Overview({ s }: { s: State }) {
             {s.jobs.slice(0, 6).map((j) => (
               <li key={j.id} className="flex items-center gap-3 py-3 text-[0.95rem]">
                 <span className={`size-2.5 shrink-0 rounded-full ${j.status === "done" ? "bg-lime ring-1 ring-ink/60" : j.status === "running" ? "bg-ink" : "bg-mute"}`} />
-                <span className="min-w-0 flex-1 truncate">{j.url ?? ({ scan: "Kanal taraması", upload: "YouTube yüklemesi", export: "Dışa aktarma", source: "Kaynak indirme", faces: "Kamera arama" } as Record<string, string>)[j.kind] ?? j.kind}</span>
+                <span className="min-w-0 flex-1 truncate">{j.url ?? ({ scan: "Kanal taraması", upload: "YouTube yüklemesi", top5: "Top 5 montajı", export: "Dışa aktarma", source: "Kaynak indirme", faces: "Kamera arama" } as Record<string, string>)[j.kind] ?? j.kind}</span>
                 <span className="text-ink-2">{({ queued: "sırada", running: "çalışıyor", done: "bitti", failed: "hata", blocked: "engellendi", cancelled: "durduruldu" } as Record<string, string>)[j.status] ?? j.status}</span>
                 {j.ended && j.run_started && <span className="tnum text-mute">{dur(j.ended - j.run_started)}</span>}
               </li>

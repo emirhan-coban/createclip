@@ -1,4 +1,6 @@
 import json
+import shutil
+import subprocess
 from pathlib import Path
 import threading
 from datetime import datetime, timezone
@@ -965,3 +967,109 @@ def test_api_youtube_connect_and_upload_guards(api):
     url = client.post("/api/youtube/connect", json={}).json()["url"]
     assert "client_id=id1" in url and "code_challenge=" in url and "api%2Fyoutube%2Fcallback" in url
     assert client.get("/api/youtube/callback?state=wrong&code=x").status_code == 400
+
+
+# ---------------------------------------------------------------- weekly montage
+def _two_clips(con, tmp_path):
+    ids = []
+    for i, name in enumerate(("a", "b")):
+        f = tmp_path / "ready" / name / f"{name}name_00h00m10s_{i}.mp4"
+        f.parent.mkdir(parents=True)
+        f.write_bytes(b"v")
+        url = f"https://kick.com/{name}/videos/1"
+        store.upsert_video(con, url, title=name, fp=f"kick|{name}tv|title" if i == 0 else "")
+        cid = store.add_clip(con, url, 10, 40, 1.0, "chat")
+        store.update_clip(con, cid, file=str(f), title=f"T{name}", status="done")
+        ids.append(cid)
+    return ids
+
+
+def test_top5_request_is_validated_and_credits_default(env):
+    from autoshorts import top5
+    tmp_path, con = env
+    a, b = _two_clips(con, tmp_path)
+    heading, items = top5.clean(con, " Top ", [{"clip_id": a, "note": "ilk"}, {"clip_id": b}])
+    assert heading == "Top" and [i["credit"] for i in items] == ["atv", "bname"]
+    for bad in ([{"clip_id": a}], [{"clip_id": a}, {"clip_id": a}], [{"clip_id": a}, {"clip_id": 999}], "x"):
+        with pytest.raises(ValueError):
+            top5.clean(con, "Top", bad)
+    with pytest.raises(ValueError):
+        top5.clean(con, "  ", [{"clip_id": a}, {"clip_id": b}])
+
+
+def test_top5_graph_and_description():
+    from autoshorts import top5
+    parts = [{"duration": 5.0, "audio": True, "overlays": [("p", 1, 2), ("q", 3, 4)]},
+             {"duration": 6.0, "audio": False, "overlays": [("r", 5, 6)]}]
+    g = top5.graph(parts)
+    assert "[2:v]overlay=1:2" in g and "[3:v]overlay=3:4" in g and "[4:v]overlay=5:6" in g
+    assert "[0:a]aresample" in g and "anullsrc" in g and g.endswith("[v0][a0][v1][a1]concat=n=2:v=1:a=1[v][a]")
+    entries = [{"note": "efsane", "title": "x", "credit": "Ali Veli", "url": "https://youtu.be/abc", "start": 62.0},
+               {"note": "", "title": "Yayın #kick", "credit": "b", "url": "https://kick.com/b/videos/1", "start": 5.0}]
+    desc, tags = top5.description(entries, ["#shorts"])
+    assert desc.startswith("1. efsane") and "t=62s" in desc and "2. Yayın" in desc and tags == ["shorts", "AliVeli", "b"]
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg yok")
+def test_top5_builds_a_real_montage(env):
+    from autoshorts import editor, top5
+    tmp_path, con = env
+    a, b = _two_clips(con, tmp_path)
+    for cid, extra in ((a, ["-f", "lavfi", "-i", "sine=duration=1", "-c:a", "aac", "-shortest"]), (b, [])):
+        subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "color=c=blue:s=360x640:d=1", *extra,
+                        "-pix_fmt", "yuv420p", store.get_clip(con, cid)["file"]], check=True)
+    new = top5.build(con, config.load(), "HAFTANIN TOP 2'Sİ", [{"clip_id": a, "note": "yorum 🔥"}, {"clip_id": b}])
+    c = store.get_clip(con, new)
+    info = editor.probe(Path(c["file"]))
+    assert c["engine"] == "top5" and c["status"] == "done" and (info["width"], info["height"]) == (1080, 1920)
+    assert info["audio"] and 1.8 < info["duration"] < 2.4 and "1. yorum" in c["description"]
+    with pytest.raises(ValueError):                       # a montage cannot go into another montage
+        top5.clean(con, "x", [{"clip_id": new}, {"clip_id": a}])
+
+
+def test_api_top5_and_montage_has_no_source(api):
+    client, app, con, tmp_path = api
+    r = client.post("/api/top5", json={"heading": "T", "items": []})
+    assert r.status_code == 400
+    cid = store.add_clip(con, "top5:1", 0, 10, 0, "top5")
+    assert client.post(f"/api/clips/{cid}/source", json={}).status_code == 409
+
+
+# ---------------------------------------------------------------- analytics
+def _connected(tmp_path, scope):
+    d = tmp_path / "data" / "youtube"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "client_secret.json").write_text('{"installed": {"client_id": "id1", "client_secret": "s"}}')
+    (d / "token.json").write_text(json.dumps({"refresh_token": "r", "access_token": "a", "expires": 4e9, "scope": scope}))
+
+
+def test_api_stats_joins_clips_and_sums_per_streamer(api, monkeypatch):
+    from autoshorts import publish
+    client, app, con, tmp_path = api
+    _connected(tmp_path, "https://www.googleapis.com/auth/youtube.upload")
+    assert client.get("/api/youtube/stats").status_code == 409                      # old login: no analytics permission
+    _connected(tmp_path, publish.SCOPES)
+    a, b = _two_clips(con, tmp_path)
+    c = store.add_clip(con, "https://kick.com/a/videos/1", 500, 530, 1.0, "chat")
+    store.update_clip(con, a, yt_id="va", yt_publish_at=1000.0)
+    store.update_clip(con, b, yt_id="vb", yt_publish_at=4e9)                        # still scheduled
+    store.update_clip(con, c, yt_id="vc", yt_publish_at=1000.0, yt_streamer="atv", status="deleted")
+    names = ["video", "views", "engagedViews", "averageViewPercentage", "averageViewDuration", "subscribersGained",
+             "likes", "comments", "shares"]
+    asked = []
+
+    def http(method, url, headers=None, body=None, timeout=0):
+        asked.append(url)
+        return 200, {}, json.dumps({"columnHeaders": [{"name": n} for n in names],
+                                    "rows": [["va", 300, 200, 50.0, 12, 3, 9, 1, 0], ["vc", 100, 50, 90.0, 20, 1, 2, 0, 0],
+                                             ["elsewhere", 5, 5, 1.0, 1, 0, 0, 0, 0]]}).encode()
+    monkeypatch.setattr(publish, "_http", http)
+    r = client.get("/api/youtube/stats?days=0").json()
+    assert "dimensions=video" in asked[0] and "startDate=2020-01-01" in asked[0] and "maxResults=200" in asked[0]
+    assert r["totals"]["views"] == 400 and r["other"] == 1 and not r["truncated"]
+    assert r["streamers"] == [{"streamer": "atv", "videos": 2, "views": 400, "engaged": 250, "subs": 4, "likes": 11,
+                               "comments": 1, "shares": 0, "avg_views": 200, "view_pct": 60.0}]
+    assert [v["state"] for v in r["videos"]] == ["data", "data", "scheduled"]
+    assert client.get("/api/youtube/stats?days=3").status_code == 400
+    monkeypatch.setattr(publish, "_http", lambda *a, **k: (403, {}, b'{"error": {"message": "YouTube Analytics API has not been used", "errors": [{"reason": "accessNotConfigured"}]}}'))
+    assert "etkin değil" in client.get("/api/youtube/stats").json()["detail"]

@@ -27,6 +27,7 @@ export function ClipDialog({ clip, onClose, onChanged }: { clip: Clip; onClose: 
     window.addEventListener("keydown", k);
     return () => { window.removeEventListener("keydown", k); document.body.style.overflow = overflow; before?.focus?.(); };
   }, [onClose]);
+  const montage = clip.engine === "top5";                    // built from other clips: no source footage, no single source link
   const flash = (m: string) => { setNote(m); setTimeout(() => setNote(""), 1600); };
 
   const save = async () => { await api(`/api/clips/${clip.id}/edit`, { title, description: desc }); onChanged(); flash("Kaydedildi"); };
@@ -44,7 +45,7 @@ export function ClipDialog({ clip, onClose, onChanged }: { clip: Clip; onClose: 
         </div>
         <div className="flex flex-col gap-3 p-6">
           <div className="flex items-start justify-between gap-3">
-            <p className="tnum text-sm text-ink-2">{hms(clip.start)}–{hms(clip.end)} · skor {clip.score.toFixed(1)}</p>
+            <p className="tnum text-sm text-ink-2">{montage ? `Montaj · ${hms(clip.end)}` : `${hms(clip.start)}–${hms(clip.end)} · skor ${clip.score.toFixed(1)}`}</p>
             <button ref={closeBtn} onClick={onClose} aria-label="Kapat" className="grid size-8 place-items-center rounded-full border border-line text-lg leading-none hover:border-ink">×</button>
           </div>
           <label className="text-sm text-ink-2" htmlFor="ct">Başlık</label>
@@ -53,7 +54,7 @@ export function ClipDialog({ clip, onClose, onChanged }: { clip: Clip; onClose: 
           <textarea id="cd" value={desc} onChange={(e) => setDesc(e.target.value)} rows={6} className="resize-y rounded-xl border border-line bg-raised px-3 py-2.5 text-[0.95rem] outline-none focus:border-ink" />
           <div className="mt-1 flex flex-wrap items-center gap-2">
             <button onClick={save} className="rounded-full bg-lime px-5 py-2.5 text-sm font-semibold text-lime-ink active:scale-95">Kaydet</button>
-            <Link to={`/editor/${clip.id}`} className="rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-paper active:scale-95">Düzenle</Link>
+            {!montage && <Link to={`/editor/${clip.id}`} className="rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-paper active:scale-95">Düzenle</Link>}
             <button onClick={copy} className="rounded-full border border-line px-4 py-2.5 text-sm hover:border-ink">Kopyala</button>
             <a href={`/media/${clip.id}.mp4`} download={clip.file} className="rounded-full border border-line px-4 py-2.5 text-sm hover:border-ink">İndir</a>
             <button onClick={() => api(`/api/clips/${clip.id}/reveal`, {})} className="rounded-full border border-line px-4 py-2.5 text-sm hover:border-ink">Finder'da göster</button>
@@ -61,9 +62,11 @@ export function ClipDialog({ clip, onClose, onChanged }: { clip: Clip; onClose: 
             <span role="status" className="text-sm text-ink-2">{note}</span>
           </div>
           <ClipUpload clip={clip} beforeUpload={save} onChanged={onChanged} />
-          <p className="mt-auto pt-3 text-sm text-ink-2">
-            Kaynak: <a className="underline underline-offset-2" href={clip.video_url} target="_blank" rel="noopener noreferrer">{clip.video_title || clip.video_url}</a>
-          </p>
+          {!montage && (
+            <p className="mt-auto pt-3 text-sm text-ink-2">
+              Kaynak: <a className="underline underline-offset-2" href={clip.video_url} target="_blank" rel="noopener noreferrer">{clip.video_title || clip.video_url}</a>
+            </p>
+          )}
         </div>
       </motion.div>
     </motion.div>

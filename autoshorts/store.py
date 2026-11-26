@@ -29,7 +29,8 @@ def connect(db: Path | None = None) -> sqlite3.Connection:
     have = {r[1] for r in con.execute("PRAGMA table_info(clips)")}
     for col, typ in (("src_file", "TEXT"), ("src_start", "REAL"), ("src_end", "REAL"),      # editor source footage
                      ("key_start", "REAL"),           # the finder's original start: the dedupe key (`start` may be snapped to a sentence)
-                     ("yt_id", "TEXT"), ("yt_publish_at", "REAL")):                  # YouTube upload, publish time (epoch)
+                     ("yt_id", "TEXT"), ("yt_publish_at", "REAL"),                   # YouTube upload, publish time (epoch)
+                     ("yt_streamer", "TEXT")):                                       # for the per-streamer comparison
         if col not in have:
             con.execute(f"ALTER TABLE clips ADD COLUMN {col} {typ}")
     vhave = {r[1] for r in con.execute("PRAGMA table_info(videos)")}
@@ -149,14 +150,14 @@ def update_clip(con, clip_id: int, **f):
 
 
 def clips(con, status: str | None = None) -> list[dict]:
-    q = "SELECT c.*, v.title AS video_title FROM clips c LEFT JOIN videos v ON v.url=c.video_url"
+    q = "SELECT c.*, v.title AS video_title, v.fp AS video_fp FROM clips c LEFT JOIN videos v ON v.url=c.video_url"
     if status:
         return rows(con, q + " WHERE c.status=? ORDER BY c.score DESC", status)
     return rows(con, q + " ORDER BY c.id")
 
 
 def get_clip(con, clip_id: int) -> dict | None:
-    r = rows(con, "SELECT c.*, v.title AS video_title FROM clips c LEFT JOIN videos v ON v.url=c.video_url "
+    r = rows(con, "SELECT c.*, v.title AS video_title, v.fp AS video_fp FROM clips c LEFT JOIN videos v ON v.url=c.video_url "
                   "WHERE c.id=?", clip_id)
     return r[0] if r else None
 

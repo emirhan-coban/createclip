@@ -13,7 +13,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import config, download, editor, faces, publish, store
+from . import analytics, config, download, editor, faces, publish, store, top5
 from .jobs import App
 
 def _clip_json(c: dict) -> dict:
@@ -21,7 +21,7 @@ def _clip_json(c: dict) -> dict:
             "title": c["title"] or "", "description": c["description"] or "", "video_title": c["video_title"] or "",
             "video_url": c["video_url"], "engine": c["engine"], "error": c["error"], "has_file": bool(c["file"] and Path(c["file"]).exists()),
             "file": Path(c["file"]).name if c["file"] else "", "created": c["created"],
-            "yt_id": c["yt_id"], "yt_publish_at": c["yt_publish_at"]}
+            "yt_id": c["yt_id"], "yt_publish_at": c["yt_publish_at"], "channel": top5.channel_of(c)}
 
 
 DIST = config.ui_dist()
@@ -294,6 +294,17 @@ def create_app(jobs: App | None = None) -> FastAPI:
             raise HTTPException(404, "file missing")
         return FileResponse(f)                         # Starlette answers Range requests, so seeking works
 
+    # ---------------------------------------------------------------- weekly montage
+    @app.post("/api/top5")
+    async def make_top5(request: Request):
+        b = await read_json(request)
+        with db() as con:
+            try:
+                heading, items = top5.clean(con, b.get("heading"), b.get("items"))
+            except ValueError as e:
+                raise HTTPException(400, str(e)) from None
+        return {"id": jobs.submit("top5", heading=heading, items=items)["id"]}
+
     # ---------------------------------------------------------------- YouTube
     @app.get("/api/youtube")
     def youtube_status():
@@ -303,6 +314,20 @@ def create_app(jobs: App | None = None) -> FastAPI:
             except (ValueError, publish.PublishError):
                 slot = None
         return publish.status() | {"next_slot": slot}
+
+    @app.get("/api/youtube/stats")
+    def youtube_stats(days: int = 28):
+        if days not in (0, 7, 28, 90):
+            raise HTTPException(400, "days: 0, 7, 28 ya da 90 olmalı")
+        if not publish.status()["analytics"]:
+            raise HTTPException(409, "Analiz izni yok. Ayarlar > YouTube'da bağlantıyı kesip yeniden bağlan.")
+        try:
+            with db() as con:
+                return analytics.report(con, days)
+        except publish.PublishError as e:
+            raise HTTPException(409, str(e))
+        except (OSError, ValueError, KeyError) as e:
+            raise HTTPException(502, f"YouTube'a ulaşılamadı: {e}")
 
     @app.post("/api/youtube/connect")
     async def youtube_connect(request: Request):
@@ -405,7 +430,8 @@ def create_app(jobs: App | None = None) -> FastAPI:
 
     @app.post("/api/clips/{cid}/source")
     async def fetch_source(cid: int):
-        clip_row(cid)
+        if clip_row(cid)["engine"] == top5.ENGINE:
+            raise HTTPException(409, "Montajın kaynak görüntüsü yok; klipleri düzenleyip montajı yeniden oluştur.")
         return {"id": jobs.submit("source", clip_id=cid)["id"]}
 
     @app.put("/api/clips/{cid}/project")

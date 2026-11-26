@@ -58,6 +58,12 @@ Başlıkları ve açıklamayı yüklemeden önce düzenle; kural tabanlıdır (y
 > hedefidir ve kanal erişimini düşürebilir; TikTok/Instagram da benzer kurallar uygular. Yayıncıdan izin al ve klibe kendi
 > katkını (yorum, bağlam) ekle. Hukuki tavsiye değildir.
 
+## Haftanın Top 5'i
+Panel > **Top 5**'te 2–5 hazır klip seç, ok düğmeleriyle sırala, istersen her birine kendi yorumunu yaz ve **Montajı oluştur** de.
+Video son sıradan 1 numaraya doğru oynar; her bölümde başlık, sıra numarası, yorumun ve "Kaynak: <yayıncı>" görünür. Açıklamaya her klibin
+kaynak yayın bağlantısı eklenir. Toplam süre 3 dakikayı geçemez. Sonuç **Panel > Klipler**'e yeni bir klip olarak düşer; izleyip oradan yüklersin.
+Montaj düzenleyicide açılmaz: bir şeyi değiştirmek için klibi ya da seçimi değiştirip yeniden oluştur.
+
 ## YouTube'a yükleme
 Hiçbir klip kendiliğinden yüklenmez: Panel > Klipler'de klibi açıp **Sıraya al** (Ayarlar'daki günlük saatler, varsayılan 13:00 ve 20:00),
 bir yayın zamanı seçip **Bu saate yükle** ya da **Şimdi yayınla** de ve onayla. Zamanlanan videoyu YouTube kendisi yayınlar, bilgisayarın açık kalması gerekmez.
@@ -67,12 +73,21 @@ Video "çocuklara özel değil" ve "Eğlence" kategorisiyle yüklenir.
 1. console.cloud.google.com'da yeni bir proje oluştur.
 2. *APIs & Services > Library*: **YouTube Data API v3**'ü etkinleştir.
 3. *Google Auth Platform* (OAuth consent screen): uygulama adı ve e-postanı gir, kullanıcı türü **External**. *Audience* sayfasında **Publish app** ile durumu
-   "In production" yap (Testing'de kalırsa izin 7 günde bir düşer). Kendi uygulaman olduğu için bağlanırken "doğrulanmamış uygulama" uyarısı çıkar.
+   "In production" yap (Testing'de kalırsa izin 7 günde bir düşer). Google bunun için *Branding* sayfasında herkese açık bir ana sayfa ve
+   aynı alan adında bir gizlilik politikası isteyebilir. Bunlar hazır değilse Testing'de kalıp *Audience > Test users*'a kendi hesabını ekle;
+   yükleme yetki hatası verince Ayarlar'da **Bağlantıyı kes** ve yeniden bağlan. Kendi uygulaman olduğu için "doğrulanmamış uygulama" uyarısı çıkar.
+   Bağlanacağın Google hesabında bir YouTube kanalı açılmış olmalı.
 4. *Clients > Create client*: tür **Desktop app**. JSON dosyasını indir.
 5. Dosyayı çalışma klasöründe `data/youtube/client_secret.json` olarak kaydet (klasörü Ayarlar > YouTube bölümü tam yoluyla gösterir).
 6. `autoshorts serve` açıkken Ayarlar > **YouTube'a bağlan**; izin ekranında kanalını seç.
 
 `data/youtube/` içindeki dosyalar şifre gibidir: paylaşma, repoya ekleme (`data/` zaten yok sayılır). API'nin günlük yükleme kotası vardır (varsayılan 100).
+
+## Analiz
+Panel > **Analiz**, panelden yüklediğin videoların YouTube sayılarını gösterir: izlenme, etkin izlenme, ortalama izlenme yüzdesi, kazanılan
+abone, beğeni ve yayıncı karşılaştırması (7/28/90 gün ya da tümü). YouTube verileri 2–3 gün gecikmeli verir ve en çok izlenen 200 videoyla sınırlar.
+Kurulum: Google Cloud'da *APIs & Services > Library*'den **YouTube Analytics API**'yi etkinleştir, sonra Ayarlar'da **Bağlantıyı kes** ve yeniden bağlan
+(izin ekranındaki tüm kutular işaretli olsun).
 
 ## Klip bulucu motorları (`engine`)
 | Motor | Ne yapar | Not |

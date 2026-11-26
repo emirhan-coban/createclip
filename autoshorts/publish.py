@@ -21,7 +21,8 @@ AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 API = "https://www.googleapis.com/youtube/v3"
 UPLOAD_URL = "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status"
-SCOPES = "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly"
+ANALYTICS_SCOPE = "https://www.googleapis.com/auth/yt-analytics.readonly"
+SCOPES = f"https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly {ANALYTICS_SCOPE}"
 CHUNK = 8 * 1024 * 1024        # must be a multiple of 256 KiB
 RETRIES = 3
 LEAD = 15 * 60                 # a queue slot must be at least this far ahead (upload + YouTube processing)
@@ -79,7 +80,10 @@ def status() -> dict:
     except PublishError:
         configured = False
     t = _read_token()
-    return {"configured": configured, "connected": bool(configured and t and t.get("refresh_token")),
+    connected = bool(configured and t and t.get("refresh_token"))
+    return {"configured": configured, "connected": connected,
+            # logins made before the analytics page (or with that box unticked) have to connect again for it
+            "analytics": connected and ANALYTICS_SCOPE in t.get("scope", "").split(),
             "channel": (t or {}).get("channel", ""), "client_secret": str(client_secret_path())}
 
 
@@ -140,7 +144,7 @@ def finish_auth(state: str, code: str):
     if not t.get("refresh_token"):
         raise PublishError("Google kalıcı izin vermedi; yeniden dene.")
     token = {"refresh_token": t["refresh_token"], "access_token": t["access_token"],
-             "expires": time.time() + t.get("expires_in", 3600), "channel": ""}
+             "expires": time.time() + t.get("expires_in", 3600), "channel": "", "scope": t.get("scope", "")}
     try:
         code_, _, body = _http("GET", f"{API}/channels?part=snippet&mine=true", {"Authorization": f"Bearer {token['access_token']}"})
         if code_ == 200:
@@ -283,5 +287,6 @@ def publish_clip(con, cfg: dict, clip_id: int, when: str = "slot", progress=lamb
     tags = json.loads(c["tags"]) if c["tags"] else []
     meta = metadata(c["title"] or "", c["description"] or "", tags, publish_at)
     video_id = upload_video(Path(c["file"]), meta, progress)
-    store.update_clip(con, clip_id, yt_id=video_id, yt_publish_at=publish_at or time.time())
+    from . import top5                                     # remembered now: deleting the clip later loses the file name
+    store.update_clip(con, clip_id, yt_id=video_id, yt_publish_at=publish_at or time.time(), yt_streamer=top5.channel_of(c))
     return {"id": video_id, "publish_at": publish_at}

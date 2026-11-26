@@ -1,7 +1,7 @@
 export type Clip = {
   id: number; status: string; score: number; start: number; end: number; title: string; description: string;
   video_title: string; video_url: string; engine: string; error: string | null; has_file: boolean; file: string; created: number;
-  yt_id: string | null; yt_publish_at: number | null;
+  yt_id: string | null; yt_publish_at: number | null; channel: string;
 };
 export type Job = {
   id: number; kind: string; status: string; url?: string; frac?: number; msg?: string; error?: string; cancelling?: boolean;
@@ -11,7 +11,13 @@ export type Source = { id: number; url: string; name: string; added: number; bac
 export type Config = { engine: string; clips_per_video: number; min_len: number; max_len: number; lead: number;
   skip_start_min: number; output_dir: string; hashtags: string[]; credit: boolean;
   layout: "blur" | "face"; split: number; keep_source_days: number; stall_min: number; power: "eco" | "normal"; upload_times: string[] };
-export type YouTube = { configured: boolean; connected: boolean; channel: string; client_secret: string; next_slot: number | null };
+export type Numbers = { views: number; engaged: number; subs: number; likes: number; comments: number; shares: number; view_pct: number };
+export type Stats = {
+  start: string; end: string; other: number; truncated: boolean; totals: Omit<Numbers, "view_pct">;
+  videos: (Numbers & { clip_id: number; yt_id: string; title: string; streamer: string; published: number | null; state: "data" | "waiting" | "scheduled"; view_secs: number })[];
+  streamers: (Numbers & { streamer: string; videos: number; avg_views: number })[];
+};
+export type YouTube = { configured: boolean; connected: boolean; analytics: boolean; channel: string; client_secret: string; next_slot: number | null };
 export type State = { now: number; jobs: Job[]; clips: Clip[]; sources: Source[]; output: string; config: Config };
 
 export async function api<T = unknown>(path: string, body?: unknown): Promise<T> {
