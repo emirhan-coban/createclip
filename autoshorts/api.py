@@ -2,6 +2,7 @@
 front end (web/dist). Safety: bound to 127.0.0.1, local Host headers only, JSON-only POSTs."""
 import asyncio
 import contextlib
+import html
 import json
 import re
 import subprocess
@@ -9,17 +10,18 @@ import sys
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import config, download, editor, faces, store
+from . import config, download, editor, faces, publish, store
 from .jobs import App
 
 def _clip_json(c: dict) -> dict:
     return {"id": c["id"], "status": c["status"], "score": c["score"], "start": c["start"], "end": c["end"],
             "title": c["title"] or "", "description": c["description"] or "", "video_title": c["video_title"] or "",
             "video_url": c["video_url"], "engine": c["engine"], "error": c["error"], "has_file": bool(c["file"] and Path(c["file"]).exists()),
-            "file": Path(c["file"]).name if c["file"] else "", "created": c["created"]}
+            "file": Path(c["file"]).name if c["file"] else "", "created": c["created"],
+            "yt_id": c["yt_id"], "yt_publish_at": c["yt_publish_at"]}
 
 
 DIST = config.ui_dist()
@@ -82,7 +84,8 @@ EDITABLE = {"engine": _engine, "clips_per_video": _num(1, 20, int), "min_len": _
             "lead": _num(0, 60, int), "skip_start_min": _num(0, 600), "output_dir": _dir, "hashtags": _tags,
             "credit": lambda v: bool(v),
             "layout": lambda v: _choice(v, ("blur", "face")), "split": _num(0.25, 0.75), "keep_source_days": _num(0, 365, int),
-            "stall_min": _num(0, 240, int), "power": lambda v: _choice(v, ("eco", "normal"))}
+            "stall_min": _num(0, 240, int), "upload_times": lambda v: publish.parse_times(v if isinstance(v, list) else [v]),
+            "power": lambda v: _choice(v, ("eco", "normal"))}
 
 
 @contextlib.contextmanager
@@ -290,6 +293,52 @@ def create_app(jobs: App | None = None) -> FastAPI:
         if not f or not f.exists():
             raise HTTPException(404, "file missing")
         return FileResponse(f)                         # Starlette answers Range requests, so seeking works
+
+    # ---------------------------------------------------------------- YouTube
+    @app.get("/api/youtube")
+    def youtube_status():
+        with db() as con:
+            try:
+                slot = publish.next_slot(publish.parse_times(config.load()["upload_times"]), publish.scheduled(con))
+            except (ValueError, publish.PublishError):
+                slot = None
+        return publish.status() | {"next_slot": slot}
+
+    @app.post("/api/youtube/connect")
+    async def youtube_connect(request: Request):
+        try:
+            return {"url": publish.auth_url(str(request.base_url) + "api/youtube/callback")}
+        except publish.PublishError as e:
+            raise HTTPException(409, str(e))
+
+    @app.get("/api/youtube/callback")
+    def youtube_callback(state: str = "", code: str = "", error: str = ""):
+        try:
+            if error or not code:
+                raise publish.PublishError("İzin verilmedi.")
+            publish.finish_auth(state, code)
+            msg, status = "YouTube bağlandı. Bu sekmeyi kapatabilirsin.", 200
+        except (publish.PublishError, OSError) as e:
+            msg, status = str(e), 400
+        return HTMLResponse(f"<!doctype html><meta charset=utf-8><title>autoshorts</title><p>{html.escape(msg)}</p>"
+                            '<p><a href="/panel/ayarlar">Ayarlara dön</a></p>', status)
+
+    @app.post("/api/youtube/disconnect")
+    async def youtube_disconnect():
+        publish.disconnect()
+        return {"ok": True}
+
+    @app.post("/api/clips/{cid}/upload")
+    async def upload(cid: int, request: Request):
+        c, b = clip_row(cid), await read_json(request)
+        if not publish.status()["connected"]:
+            raise HTTPException(409, "YouTube bağlı değil. Ayarlar > YouTube'dan bağlan.")
+        if c["yt_id"] or any(j["kind"] == "upload" and j.get("clip_id") == cid and j["status"] in ("queued", "running") for j in jobs.jobs):
+            raise HTTPException(409, "Bu klip zaten yüklendi ya da yükleme sırasında.")
+        when = b.get("when", "slot")
+        if when not in ("slot", "now"):
+            when = _bounded(b, "when", 0, 1e11, float, "slot")
+        return {"id": jobs.submit("upload", clip_id=cid, when=when)["id"]}
 
     # ---------------------------------------------------------------- editor
     @app.get("/api/clips/{cid}/editor")

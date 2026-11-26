@@ -16,10 +16,11 @@ DEFAULTS = {
     "hashtags": ["#shorts"],
     "credit": True,            # put the source link in the description file
     "watch_every_min": 60,
-    "layout": "blur",          # layout of new clips: blur (blurred background) | face (camera on top, game below)
+    "layout": "blur",          # layout of new clips: blur (black bars) | face (camera on top, game below)
     "split": 0.4,              # face layout: share of the height given to the camera window (0.25-0.75)
     "keep_source_days": 14,    # source footage of clips with no saved edit is deleted after N days (0 = keep)
     "power": "eco",            # eco: hardware encoder, 2 ffmpeg threads, low priority | normal: all cores, x264, normal priority
+    "upload_times": ["13:00", "20:00"],   # daily YouTube publish slots (local time) for queued uploads
     "stall_min": 20,           # a job that makes no progress for N minutes is stopped (0 = never)
 }
 _root = Path.cwd()

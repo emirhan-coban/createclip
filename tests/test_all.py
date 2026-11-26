@@ -899,3 +899,69 @@ def test_youtube_chat_download_reports_replay_position(tmp_path, monkeypatch):
     vod = Vod("x" * 11, "k", "t", 6000.0, 0, 0, "https://youtu.be/xxxxxxxxxxx")
     youtube.fetch_chat(vod, tmp_path, progress=lambda f, n, t="": seen.append((f, n, t)))
     assert any(abs(f - 0.1) < 0.01 and n == 3 and "10. dakika" in t for f, n, t in seen)
+
+
+# ---------------------------------------------------------------- YouTube upload
+def test_next_slot_skips_taken_and_too_close():
+    from autoshorts import publish
+    at = lambda d, h, m=0: datetime(2026, 11, d, h, m).timestamp()          # local time, like the slots
+    times = publish.parse_times(["20:00", "13.00"])
+    assert times == ["13:00", "20:00"]
+    assert publish.next_slot(times, [], at(26, 9)) == at(26, 13)
+    assert publish.next_slot(times, [], at(26, 12, 50)) == at(26, 20)       # closer than LEAD
+    assert publish.next_slot(times, [at(26, 20), at(27, 13)], at(26, 14)) == at(27, 20)
+    with pytest.raises(ValueError):
+        publish.parse_times(["25:00"])
+
+
+def test_publish_metadata_limits_and_schedule():
+    from autoshorts import publish
+    m = publish.metadata("<b>" + "a" * 200, "d", ["#shorts", "x" * 600], 0)
+    assert len(m["snippet"]["title"]) == 100 and "<" not in m["snippet"]["title"]
+    assert m["snippet"]["tags"] == ["shorts"] and m["status"]["privacyStatus"] == "public"
+    s = publish.metadata("t", "d", [], datetime(2026, 11, 26, 13, tzinfo=timezone.utc).timestamp())["status"]
+    assert s["privacyStatus"] == "private" and s["publishAt"] == "2026-11-26T13:00:00Z"
+
+
+def test_publish_clip_resumes_and_records_once(env, monkeypatch):
+    tmp_path, con = env
+    from autoshorts import publish
+    cid, f = _done_clip(con, tmp_path)
+    store.update_clip(con, cid, title="Başlık")
+    monkeypatch.setattr(publish, "access_token", lambda: "tok")
+    monkeypatch.setattr(publish, "CHUNK", 8)
+    monkeypatch.setattr(publish.time, "sleep", lambda s: None)
+    size, got, calls = f.stat().st_size, bytearray(), []
+
+    def http(method, url, headers=None, body=None, timeout=0):
+        if method == "POST":
+            return 200, {"Location": "https://upload/session"}, b""
+        rng = headers["Content-Range"]
+        calls.append(rng)
+        if len(calls) == 2:                                  # the connection drops once
+            raise OSError("reset")
+        if not rng.startswith("bytes */"):
+            got.extend(body)
+        if len(got) == size:
+            return 200, {}, b'{"id": "vid123"}'
+        return 308, {"Range": f"bytes=0-{len(got) - 1}"}, b""
+    monkeypatch.setattr(publish, "_http", http)
+    r = publish.publish_clip(con, config.load(), cid, "slot")
+    assert r["id"] == "vid123" and bytes(got) == f.read_bytes() and f"bytes */{size}" in calls
+    c = store.get_clip(con, cid)
+    assert c["yt_id"] == "vid123" and c["yt_publish_at"] == r["publish_at"]
+    with pytest.raises(publish.PublishError):
+        publish.publish_clip(con, config.load(), cid, "now")
+
+
+def test_api_youtube_connect_and_upload_guards(api):
+    client, app, con, tmp_path = api
+    cid, _ = _done_clip(con, tmp_path)
+    assert client.get("/api/youtube").json()["configured"] is False
+    assert client.post(f"/api/clips/{cid}/upload", json={}).status_code == 409
+    assert client.post("/api/youtube/connect", json={}).status_code == 409
+    d = tmp_path / "data" / "youtube"
+    (d / "client_secret.json").write_text('{"installed": {"client_id": "id1", "client_secret": "s"}}')
+    url = client.post("/api/youtube/connect", json={}).json()["url"]
+    assert "client_id=id1" in url and "code_challenge=" in url and "api%2Fyoutube%2Fcallback" in url
+    assert client.get("/api/youtube/callback?state=wrong&code=x").status_code == 400

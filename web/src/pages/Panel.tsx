@@ -5,6 +5,7 @@ import { api, dur, size, type Clip, type Config, type State } from "../lib/api";
 import { useAppState } from "../lib/useAppState";
 import { Poster } from "../components/Poster";
 import { ClipDialog } from "../components/ClipDialog";
+import { YouTubeSettings } from "../components/YouTube";
 
 const NAV = [
   { to: "/panel", label: "Genel bakış", end: true },
@@ -76,7 +77,7 @@ function Overview({ s }: { s: State }) {
             {s.jobs.slice(0, 6).map((j) => (
               <li key={j.id} className="flex items-center gap-3 py-3 text-[0.95rem]">
                 <span className={`size-2.5 shrink-0 rounded-full ${j.status === "done" ? "bg-lime ring-1 ring-ink/60" : j.status === "running" ? "bg-ink" : "bg-mute"}`} />
-                <span className="min-w-0 flex-1 truncate">{j.url ?? "Kanal taraması"}</span>
+                <span className="min-w-0 flex-1 truncate">{j.url ?? ({ scan: "Kanal taraması", upload: "YouTube yüklemesi", export: "Dışa aktarma", source: "Kaynak indirme", faces: "Kamera arama" } as Record<string, string>)[j.kind] ?? j.kind}</span>
                 <span className="text-ink-2">{({ queued: "sırada", running: "çalışıyor", done: "bitti", failed: "hata", blocked: "engellendi", cancelled: "durduruldu" } as Record<string, string>)[j.status] ?? j.status}</span>
                 {j.ended && j.run_started && <span className="tnum text-mute">{dur(j.ended - j.run_started)}</span>}
               </li>
@@ -146,14 +147,16 @@ function Channels({ s, refresh }: { s: State; refresh: () => void }) {
 
 function Settings({ s, refresh }: { s: State; refresh: () => void }) {
   const c = s.config;
-  const [f, setF] = useState({ ...c, hashtags: c.hashtags.join(" ") });
+  const [f, setF] = useState({ ...c, hashtags: c.hashtags.join(" "), upload_times: c.upload_times.join(" ") });
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const set = <K extends keyof typeof f>(k: K, v: (typeof f)[K]) => setF((x) => ({ ...x, [k]: v }));
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const r = await api<{ config: Config }>("/api/config", { ...f, hashtags: f.hashtags.split(/\s+/).filter(Boolean) });
-      setF({ ...r.config, hashtags: r.config.hashtags.join(" ") });      // show what was actually saved (e.g. "#" added)
+      const r = await api<{ config: Config }>("/api/config", {
+        ...f, hashtags: f.hashtags.split(/\s+/).filter(Boolean), upload_times: f.upload_times.split(/[\s,]+/).filter(Boolean),
+      });
+      setF({ ...r.config, hashtags: r.config.hashtags.join(" "), upload_times: r.config.upload_times.join(" ") });      // show what was actually saved (e.g. "#" added)
       setMsg({ ok: true, text: "Kaydedildi" }); refresh();
     } catch (x) { setMsg({ ok: false, text: (x as Error).message }); }
     setTimeout(() => setMsg(null), 3500);
@@ -191,7 +194,7 @@ function Settings({ s, refresh }: { s: State; refresh: () => void }) {
             <option value="blur">Siyah arka plan</option>
             <option value="face">Kamera üstte, oyun altta</option>
           </select>
-          <span className="mt-1 block text-xs text-mute">Kamera yüzü bulunamazsa bulanık yerleşim kullanılır.</span>
+          <span className="mt-1 block text-xs text-mute">Kamera yüzü bulunamazsa siyah arka plan kullanılır.</span>
         </label>
         <label className="block">
           <span className="text-sm text-ink-2">Kamera penceresi yüksekliği</span>
@@ -213,6 +216,11 @@ function Settings({ s, refresh }: { s: State; refresh: () => void }) {
           <span className="text-sm text-ink-2">Etiketler</span>
           <input value={f.hashtags} onChange={(e) => set("hashtags", e.target.value)} className={`${field} mt-1`} placeholder="#shorts #oyun" />
         </label>
+        <label className="block">
+          <span className="text-sm text-ink-2">YouTube yayın saatleri</span>
+          <input value={f.upload_times} onChange={(e) => set("upload_times", e.target.value)} className={`${field} tnum mt-1`} placeholder="13:00 20:00" />
+          <span className="mt-1 block text-xs text-mute">Sıraya alınan klipler bu saatlere dağıtılır</span>
+        </label>
         <label className="block sm:col-span-2">
           <span className="text-sm text-ink-2">Klipler şuraya kaydedilir</span>
           <input value={f.output_dir} onChange={(e) => set("output_dir", e.target.value)} className={`${field} mt-1`} />
@@ -227,6 +235,7 @@ function Settings({ s, refresh }: { s: State; refresh: () => void }) {
         <button className="rounded-full bg-lime px-6 py-2.5 font-semibold text-lime-ink active:scale-95">Kaydet</button>
         <span role="status" className={`text-sm ${msg && !msg.ok ? "text-danger" : "text-ink-2"}`}>{msg?.text}</span>
       </div>
+      <YouTubeSettings />
       <Storage />
     </form>
   );

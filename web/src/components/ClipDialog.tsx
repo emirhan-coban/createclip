@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
 import { Link } from "react-router-dom";
 import { api, hms, type Clip } from "../lib/api";
+import { ClipUpload } from "./YouTube";
 
 export function ClipDialog({ clip, onClose, onChanged }: { clip: Clip; onClose: () => void; onChanged: () => void }) {
   const [title, setTitle] = useState(clip.title);
@@ -59,6 +60,7 @@ export function ClipDialog({ clip, onClose, onChanged }: { clip: Clip; onClose: 
             <button onClick={del} className="rounded-full px-3 py-2.5 text-sm text-danger hover:underline">Sil</button>
             <span role="status" className="text-sm text-ink-2">{note}</span>
           </div>
+          <ClipUpload clip={clip} beforeUpload={save} onChanged={onChanged} />
           <p className="mt-auto pt-3 text-sm text-ink-2">
             Kaynak: <a className="underline underline-offset-2" href={clip.video_url} target="_blank" rel="noopener noreferrer">{clip.video_title || clip.video_url}</a>
           </p>

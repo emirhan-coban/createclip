@@ -28,7 +28,8 @@ def connect(db: Path | None = None) -> sqlite3.Connection:
     con.executescript(SCHEMA)
     have = {r[1] for r in con.execute("PRAGMA table_info(clips)")}
     for col, typ in (("src_file", "TEXT"), ("src_start", "REAL"), ("src_end", "REAL"),      # editor source footage
-                     ("key_start", "REAL")):          # the finder's original start: the dedupe key (`start` may be snapped to a sentence)
+                     ("key_start", "REAL"),           # the finder's original start: the dedupe key (`start` may be snapped to a sentence)
+                     ("yt_id", "TEXT"), ("yt_publish_at", "REAL")):                  # YouTube upload, publish time (epoch)
         if col not in have:
             con.execute(f"ALTER TABLE clips ADD COLUMN {col} {typ}")
     vhave = {r[1] for r in con.execute("PRAGMA table_info(videos)")}

@@ -32,7 +32,7 @@ def editor_dir(clip_id: int) -> Path:
 
 # ---------------------------------------------------------------- the model
 def default_project(clip: dict) -> dict:
-    """The edit that reproduces the clip as it was first rendered (blurred background, original cut)."""
+    """The edit that reproduces the clip as it was first rendered (black bars, original cut)."""
     s0 = float(clip["src_start"] or 0)
     return {"version": 1,
             "trim": {"in": round(float(clip["start"]) - s0, 2), "out": round(float(clip["end"]) - s0, 2)},

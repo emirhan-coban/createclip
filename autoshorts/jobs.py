@@ -5,7 +5,7 @@ import re
 import threading
 import time
 
-from . import config, download, editor, pipeline, power, proc, store
+from . import config, download, editor, pipeline, power, proc, publish, store
 from .proc import log
 
 
@@ -143,6 +143,10 @@ class App:
                     saved = editor.export_clip(con, cfg, job["clip_id"], job["project"], prog)
                     emit("exported", id=job["clip_id"], file=saved.name)
                     say(f"Kaydedildi: {saved.name}")
+                elif job["kind"] == "upload":                      # one clip to YouTube, asked for by the user
+                    r = publish.publish_clip(con, cfg, job["clip_id"], job.get("when") or "slot", prog)
+                    when = time.strftime("%d.%m %H:%M", time.localtime(r["publish_at"])) if r["publish_at"] else "hemen"
+                    say(f"YouTube'a yüklendi (yayın: {when}): https://youtu.be/{r['id']}")
                 else:                                              # scan: watched channels
                     say(str(pipeline.watch_once(con, cfg, say, prog)))
                 job["status"] = "done"
